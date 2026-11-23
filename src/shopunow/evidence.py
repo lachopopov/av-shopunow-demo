@@ -1,0 +1,1136 @@
+# Python 3.12 / Pydantic 2.14.1; internal post-clearance evidence, never a delivered answer.
+from dataclasses import dataclass, replace
+from threading import BoundedSemaphore, Lock
+from uuid import UUID, uuid4
+from types import MappingProxyType
+from typing import Literal, Mapping
+from typesafe_sdk import ChoiceAnswer  # Preserve provider-native judgments, not a parallel probability schema.
+from shopunow.incoming import HISTORY_SUBJECT_FIELD, semantic_confident
+from shopunow.knowledge import knowledge_filter, verify_knowledge, source_disposition
+from shopunow.records import (PendingMessage, verify_pending_message, verify_terminal_outcome,
+    verify_complete_transcript, verify_transcript_events)
+from shopunow.records import verify_owned_conversation_header, HISTORY_EVIDENCE_KINDS
+
+
+_MODEL_SLOTS = BoundedSemaphore(5)  # One process-wide bound, shared by all participating requests.
+
+
+class ModelBudget:
+    """Count actual attempts, including failed attempts, without resetting the request deadline."""
+    def __init__(self, *, attempts=0):
+        if type(attempts) is not int or not 0 <= attempts <= 40:
+            raise ValueError('Invalid inherited model-attempt count.')
+        self.attempts, self._lock = attempts, Lock()
+
+    def call(self, operation, *, timeout):
+        # timeout is a guarded function, so waits never reuse old authorization.
+        timeout()
+        if not _MODEL_SLOTS.acquire(blocking=False):
+            raise TimeoutError('Model capacity unavailable.')
+        try:
+            with self._lock:
+                if self.attempts >= 40:
+                    raise TimeoutError('Model-attempt budget exhausted.')
+                remaining = timeout()
+                self.attempts += 1
+            result = operation(min(20.0,remaining))  # Approved per-call cap inside the original deadline.
+            timeout()  # Late results cannot become usable evidence.
+            return result
+        finally:
+            _MODEL_SLOTS.release()
+
+
+@dataclass(frozen=True)
+class EvidenceCandidate:
+    excerpt_id: str
+    source_kind: str
+    source_record_id: str
+    source_version: str | None
+    text: str
+    destination: str
+    owner_user_id: str | None = None
+    conversation_id: str | None = None
+    clearance: str = 'pending'
+    audience: tuple[str, ...] = ()
+    department_or_company_wide: str | None = None
+    classification: str | None = None
+    approval_current: bool | None = None
+    returned_metadata: Mapping | None = None
+    retrieval_scope: Mapping | None = None
+    relevance_basis: str = 'pending'
+
+
+@dataclass(frozen=True)
+class PartDisposition:
+    # Code-owned outcomes survive synthesis; a model's empty unresolved list cannot erase them.
+    part: str
+    kind: Literal['supported_answer','clarification_needed','handoff_needed','insufficient_evidence',
+                  'technical_failure','refusal','security_fallback','unavailable','incomplete_at_cutoff']
+
+
+@dataclass(frozen=True)
+class EvidenceResult:
+    kind: str
+    cleared: tuple[EvidenceCandidate, ...] = ()
+    unresolved_parts: tuple[str, ...] = ()
+    pending_message_id: str | None = None
+    response_style: str | None = None
+    security_fallback_parts: tuple[str, ...] = ()
+    refused_parts: tuple[str, ...] = ()
+    handoff_parts: tuple[str, ...] = ()
+    destinations: tuple[str, ...] = ()  # Validated producer destinations, finalized after case discovery if needed.
+    resolution_candidates: tuple[EvidenceCandidate, ...] = ()  # Clean and permitted, not admitted answer facts.
+    judgments: Mapping | None = None  # Native answers keyed by their stage and target.
+    unresolved_judgments: tuple[str, ...] = ()
+    dependency: str = 'unclear'  # Downstream partial-answer policy must not reconstruct this from labels.
+    requires_action_handoff: bool = False  # Preserve a mixed request's unsupported action for assembly.
+    dispositions: tuple[PartDisposition, ...] = ()  # Content-free historical/access outcomes, not answer facts.
+
+
+def _rows(raw, *, query=False):
+    # Preserve native IDs/documents/metadata, rejecting malformed/unequal batches.
+    if not isinstance(raw, dict):
+        raise ValueError('Invalid retrieval response.')
+    values = [raw.get(key) for key in ('ids','documents','metadatas')]
+    if query:
+        if any(type(value) is not list or len(value) != 1 for value in values):
+            raise ValueError('Invalid query batch.')
+        values = [value[0] for value in values]
+    if any(type(value) is not list for value in values) or len({len(v) for v in values}) != 1:
+        raise ValueError('Incomplete retrieval rows.')
+    if any(type(key) is not str for key in values[0]) or len(set(values[0])) != len(values[0]):
+        raise ValueError('Invalid retrieval IDs.')
+    return list(zip(*values, strict=True))
+
+
+class EvidenceService:
+    """Caller owns admitted lease/clients; only an actual clear routing continuation invokes prepare.
+
+    The result is an internal producer-input boundary. No HTTP success, terminal write,
+    producer generation, or live enablement is supplied by this component.
+    """
+    def __init__(self, *, storage, catalog, models, attempt, tracking, request, profile,
+                 transcript, request_id, created_at, budget, uuid_factory=uuid4,topic_trigger=None,
+                 semantic_confidence_trigger=None,history_identity_resolver=None,answer_models=None):
+        if (tracking is not attempt._hold_tracking or request.user_id != profile.user_id
+                or str(UUID(request.conversation_id)) != attempt._hold_id):
+            raise ValueError('Evidence must retain admitted identity and tracking.')
+        self.storage, self.catalog, self.models = storage, catalog, models
+        self.attempt, self.tracking, self.request, self.profile = attempt, tracking, request, profile
+        self.transcript, self.request_id, self.created_at = transcript, str(UUID(request_id)), created_at
+        self.budget, self.uuid_factory = budget, uuid_factory
+        self.topic_trigger=topic_trigger  # Explicit incoming configuration; no new default threshold.
+        self.semantic_confidence_trigger=semantic_confidence_trigger
+        self.history_identity_resolver=history_identity_resolver  # Explicit opt-in; normal serving stays unchanged.
+        self._identity_attempted=False  # Shared across initial and supplementary searches in this request.
+        self._identity_selected_ids=set()  # New classifier selections still need exact historical access.
+        self.searches, self.pending, self._ids = 0, None, set()
+        self._supplemented = False
+        self._selected, self._reviewed = [], 0
+        self._relevance_unresolved=set()  # Matching uncertainty never becomes access permission or factual support.
+        self._judgments,self._unresolved_judgments={},[]
+        self._resolution_candidates=[]
+        self._pending_sources,self._pending_destinations=set(),set()
+        self._source_classification=None
+        self._history_outcome=None
+        self._history_dispositions=[]  # Keep initial and supplementary outcomes; a later lookup cannot erase one.
+        self._history_access_ids=set()  # Permission applies to exact reviewed records, not a later history search.
+        self._history_subject='allowed'  # Latest code-owned subject decision for recalled employee history.
+        self._withheld_history_ids=set()  # A denial lasts for the request; a later search cannot reverse it.
+        self._malicious_history_ids=set()  # Only successful per-ID review can establish this exclusion.
+        self.answer_models=answer_models  # Explicit opt-in; no normal runtime model is enabled.
+        self._routing_attempted=self._candidate_attempted=False
+        self._semantic_sources={}
+        self._descriptor_results={}
+        self._semantic_dependency=False
+        self._work_timeout=None  # The serialized continuation may impose the earlier specialist cutoff.
+
+    def _adjudicate_route(self,decision,*,history=(),history_status='not_requested'):
+        """Resolve semantics once; code retains access, source disposition and dispatch authority."""
+        from shopunow.model_clients import RoutingResolution
+        if self.answer_models is None or self._routing_attempted:
+            return decision
+        self._routing_attempted=True  # Invalid/failed responses consume this opportunity too.
+        descriptors=[{'source_id':row.source_id,'source_question':row.source_question,
+            'subject':row.subject,'audience':list(row.eligible_audience),
+            'classification':row.classification,'access_scope':row.access_scope}
+            for row in self.catalog.values() if self.profile.role in row.eligible_audience]
+        if any(row.source_kind!='owned_history' or row.clearance!='clean' for row in history):
+            raise ValueError('Routing adjudication requires reviewed owned history.')
+        payload={'question':self.request.question,'role':self.profile.role,
+            'home_department':self.profile.home_department,'descriptors':descriptors,
+            'history_status':history_status,'history':[{'excerpt_id':row.excerpt_id,'text':row.text,
+                'conversation_id':row.conversation_id} for row in history],
+            'judgments':{key:value.model_dump() for key,value in self._judgments.items()},
+            'unresolved_judgments':list(self._unresolved_judgments)}
+        raw=self._model(self.answer_models.resolve_routing,payload)
+        resolved=RoutingResolution.model_validate(raw.model_dump() if hasattr(raw,'model_dump') else raw)
+        source_ids=[row.source_id for row in resolved.source_matches]
+        if (resolved.question!=self.request.question or len(source_ids)!=len(set(source_ids))
+                or not set(source_ids)<={row['source_id'] for row in descriptors}
+                or len(resolved.destinations)!=len(set(resolved.destinations))):
+            raise ValueError('Unbound routing adjudication.')
+        self._judgments['semantic.routing']=resolved
+        if resolved.status!='resolved':
+            return replace(decision,kind='clarification_needed' if resolved.status=='ambiguous'
+                           else 'insufficient_evidence')
+        # Nullable values never replace an unresolved judgment with a convenient default.
+        intent_unresolved=('incoming.intent' in self._unresolved_judgments or decision.kind=='semantic_resolution')
+        dependency_unresolved=any(key.endswith('.department_dependency') for key in self._unresolved_judgments)
+        intent=((resolved.intent or 'unclear_or_other') if intent_unresolved else decision.intent)
+        dependency=((resolved.dependency or 'unclear') if dependency_unresolved else decision.dependency)
+        self.dependency=dependency  # Partial adjudication must not expose an unresolved winning label.
+        if intent_unresolved and resolved.intent is not None:
+            self._unresolved_judgments=[key for key in self._unresolved_judgments if key!='incoming.intent']
+        if dependency_unresolved and resolved.dependency is not None:
+            self._semantic_dependency=True
+            self._unresolved_judgments=[key for key in self._unresolved_judgments
+                                       if not key.endswith('.department_dependency')]
+        for item in resolved.source_matches:
+            key='descriptors.source_'+item.source_id.replace('-','_')
+            if key in self._judgments and key not in self._unresolved_judgments:
+                continue  # An unrelated resolution cannot rewrite an already settled descriptor.
+            self._semantic_sources[item.source_id]=item.match
+            if item.match!='uncertain':
+                self._pending_sources.discard(item.source_id)
+                self._unresolved_judgments=[value for value in self._unresolved_judgments if value!=key]
+        stage='history_route.' if any(key.startswith('history_route.') for key in self._judgments) else 'incoming.'
+        proposed=[]
+        for part in resolved.destinations:
+            key=stage+('company_wide_topic' if part=='central_support' else 'topic_'+part)
+            answer=self._judgments.get(key)
+            if (answer is None or key in self._unresolved_judgments or
+                    (self.topic_trigger is not None and answer.noul>=self.topic_trigger)):
+                proposed.append(part)
+        destinations=tuple(dict.fromkeys((*decision.destinations,*proposed)))
+        refused=tuple(dict.fromkeys((*decision.refused_departments,*(part for part in destinations
+            if self.profile.role=='customer' and part in ('hr','it_support','facilities_admin')))))
+        self.refused_parts=refused  # Early action/ambiguity exits must retain code-owned access dispositions.
+        permitted=tuple(part for part in destinations if part not in refused)
+        for part in destinations:
+            suffix='company_wide_topic' if part=='central_support' else 'topic_'+part
+            self._unresolved_judgments=[key for key in self._unresolved_judgments
+                                       if not key.endswith('.'+suffix)]
+        if not any(key.startswith('incoming.') and not (key.startswith('incoming.topic_') or key in (
+                'incoming.company_wide_topic','incoming.history_needed')) for key in self._unresolved_judgments):
+            self._pending_destinations.difference_update(permitted)
+        # Only an explicit information result with a usable route clears a low-confidence action label.
+        weak_action=decision.intent=='individual_case_or_action' and intent_unresolved
+        cleared_action=weak_action and intent=='information' and bool(permitted)
+        self._action_required=((decision.requires_action_handoff and not cleared_action)
+                               or intent in ('mixed','individual_case_or_action'))
+        kind=('refusal' if refused and (not permitted or dependency!='independent') else
+              'handoff_needed' if intent=='individual_case_or_action' or (weak_action and not cleared_action
+                                                                         and intent=='information') else
+              'clarification_needed' if intent=='unclear_or_other' else
+              'continue' if permitted else 'insufficient_evidence')
+        return replace(decision,kind=kind,destinations=permitted,refused_departments=refused,
+            intent=intent,dependency=dependency,proposed_destinations=permitted,
+            requires_action_handoff=self._action_required)
+
+    def _adjudicate_candidates(self,result):
+        """Promote only exact, security-cleared, access-verified relevant candidate IDs."""
+        from shopunow.model_clients import CandidateResolution
+        if (self.answer_models is None or self._candidate_attempted or not result.resolution_candidates
+                or result.kind not in ('ready','insufficient_evidence','clarification_needed')):
+            return result
+        candidates=tuple(row for row in result.resolution_candidates if row.clearance=='clean'
+            and (row.destination in self.destinations or row.source_kind=='owned_history')
+            and (row.source_kind!='owned_history' or row.source_record_id in self._history_access_ids)
+            and row.source_record_id not in self._pending_sources
+            and row.destination not in self._pending_destinations)
+        if not candidates or 'incoming.intent' in self._unresolved_judgments:
+            return result
+        self._candidate_attempted=True
+        payload={'question':self.request.question,'destinations':list(self.destinations),
+            'candidates':[{'excerpt_id':row.excerpt_id,'text':row.text,'source_kind':row.source_kind,
+                'source_record_id':row.source_record_id,'source_version':row.source_version,
+                'destination':row.destination,'owner_user_id':row.owner_user_id,
+                'conversation_id':row.conversation_id,'audience':list(row.audience),
+                'department_or_company_wide':row.department_or_company_wide,
+                'classification':row.classification,'approval_current':row.approval_current,
+                'clearance':row.clearance,'relevance_basis':row.relevance_basis,
+                # Detach existing verified mappings into JSON-compatible native input, without new authority.
+                'returned_metadata':dict(row.returned_metadata or {}),
+                'retrieval_scope':dict(row.retrieval_scope or {}),
+                # Reuse the approved source schema and omit its separate facts, already bounded by this excerpt.
+                'source_descriptor':self.catalog[row.source_record_id].model_dump(mode='json',
+                    exclude={'answer_facts'}) if row.source_kind=='knowledge' else None} for row in candidates]}
+        raw=self._model(self.answer_models.resolve_candidates,payload)
+        resolved=CandidateResolution.model_validate(raw.model_dump() if hasattr(raw,'model_dump') else raw)
+        status=resolved.outcome.status
+        ids=resolved.outcome.relevant_excerpt_ids if status=='resolved' else []
+        if (resolved.question!=self.request.question or len(ids)!=len(set(ids))
+                or not set(ids)<={row.excerpt_id for row in candidates}):
+            raise ValueError('Unbound candidate adjudication.')
+        self._judgments['semantic.candidates']=resolved
+        # History the user asked for stays visibly unresolved when no recalled excerpt was confirmed.
+        history_rejected=(any(row.source_kind=='owned_history' for row in candidates)
+            and not any(row.source_kind=='owned_history' for row in self._selected)
+            and not any(row.source_kind=='owned_history' and row.excerpt_id in ids for row in candidates))
+        rejected_outcome=PartDisposition('history','clarification_needed' if status=='ambiguous'
+                                         else 'insufficient_evidence')
+        if status!='resolved':
+            if history_rejected:
+                self._relevance_unresolved.add('history')
+                self._history_dispositions.append(rejected_outcome)
+            return replace(result,kind='clarification_needed' if status=='ambiguous' else result.kind)
+        decided={row.excerpt_id for row in candidates}
+        promoted=[replace(row,relevance_basis='semantic_adjudication') for row in candidates if row.excerpt_id in ids]
+        self._selected.extend(promoted)
+        self._resolution_candidates=[row for row in self._resolution_candidates if row.excerpt_id not in decided]
+        self._unresolved_judgments=[key for key in self._unresolved_judgments
+            if key not in {'knowledge.'+identity for identity in decided}]
+        # Another source in the same department remains an explicit unresolved contribution.
+        pending_parts={'central_support' if self.catalog[key].subject=='company_wide' else self.catalog[key].subject
+                       for key in self._pending_sources if key in self.catalog}
+        settled={row.destination for row in candidates} - {
+            row.destination for row in self._resolution_candidates} - pending_parts
+        self._relevance_unresolved.difference_update(settled)
+        if history_rejected:
+            self._relevance_unresolved.add('history')
+            self._history_dispositions.append(rejected_outcome)
+        factual=any(row.source_kind in ('knowledge','owned_history') for row in self._selected)
+        return replace(result,kind='ready' if factual and result.kind!='clarification_needed' else result.kind,
+            cleared=tuple(self._selected),resolution_candidates=tuple(self._resolution_candidates),
+            unresolved_parts=tuple(part for part in result.unresolved_parts if part not in settled))
+
+    def timeout(self):
+        remaining = self.attempt.normal_work_timeout()
+        if remaining is None:
+            raise TimeoutError('Evidence request stopped.')
+        if self._work_timeout is not None:
+            remaining=min(remaining,self._work_timeout())
+            if remaining<=0:
+                raise TimeoutError('Evidence continuation cutoff reached.')
+        return remaining
+
+    def _read(self, operation, *args, **kwargs):
+        result = operation(*args, timeout=min(8.0,self.timeout()), **kwargs)
+        self.timeout()
+        return result
+
+    def _event(self,outcome,stage):
+        from shopunow.api import question_event
+        question_event(self.request_id,outcome,stage=stage)  # Fixed code plus opaque ID only.
+
+    def _model(self, operation, *args,**kwargs):
+        return self.budget.call(lambda remaining:operation(*args,timeout=remaining,**kwargs), timeout=self.timeout)
+
+    def _matching(self,target,candidates,stage):
+        """Apply commitment policy while retaining the native answers for a later consumer."""
+        answers=self._model(self.models.relevance,target,tuple(candidates))
+        expected={row.excerpt_id for row in candidates}
+        history=any(row.source_kind=='owned_history' for row in candidates)
+        if set(answers)!=expected|({'case_resolution'} if history else set()):
+            raise ValueError('Incomplete relevance judgments.')
+        selected,uncertain=[],[]
+        kind=None
+        for key,answer in answers.items():
+            if not isinstance(answer,ChoiceAnswer):
+                raise ValueError('Relevance requires native validated Choice answers.')
+            identity=stage+'.'+key
+            self._judgments[identity]=answer
+            confident=semantic_confident(answer,self.semantic_confidence_trigger)
+            if not confident or answer.choice=='uncertain':
+                self._unresolved_judgments.append(identity)
+            if key=='case_resolution':
+                kind=answer.choice if confident else 'uncertain'
+                if kind!='clear' and identity not in self._unresolved_judgments:
+                    self._unresolved_judgments.append(identity)
+            elif confident and answer.choice=='relevant':
+                selected.append(key)
+            elif not confident or answer.choice=='uncertain':
+                # Keep the whole distribution; tied third options cannot silently disappear.
+                ranked=sorted(answer.probabilities.values(),reverse=True)
+                if answer.choice=='uncertain' or answer.probabilities['relevant']>=ranked[1]:
+                    uncertain.append(key)
+        return kind or ('clear' if selected else 'insufficient'),tuple(selected),tuple(uncertain)
+
+    def _candidate(self, *, kind, key, text, destination, version=None, conversation=None,
+                   metadata=None,scope=None):
+        # IDs are issued by code and never taken from retrieved text/model output.
+        identity = 'e' + str(len(self._ids)+1)
+        self._ids.add(identity)
+        labels={} if metadata is None else metadata
+        # Freeze detached native labels; array-valued audience metadata cannot mutate clearance.
+        detached={key:tuple(value) if isinstance(value,list) else value for key,value in labels.items()}
+        return EvidenceCandidate(identity,kind,key,version,text,destination,
+            self.profile.user_id if kind != 'knowledge' else None,conversation,
+            audience=tuple(labels.get('eligible_audience',())),
+            department_or_company_wide=labels.get('subject'),classification=labels.get('classification'),
+            approval_current=True if kind=='knowledge' else None,
+            returned_metadata=MappingProxyType(detached),
+            retrieval_scope=MappingProxyType({} if scope is None else dict(scope)))
+
+    def save_pending(self):
+        """Slice 5: save and exact-verify the question for a gate outcome that ran no evidence stage."""
+        self._save_pending()
+        return self.pending
+
+    def _save_pending(self):
+        if self.pending is not None:
+            raise ValueError('Pending intent cannot be reused.')
+        if not self.transcript.has_two_event_room:
+            raise ValueError('No reserved event room.')
+        # Markers have no normal sequence: only prior complete normal pairs consume positions.
+        markers=sum(notice.reason_code!='technical_error' for notice in self.transcript.notices)
+        sequence = self.transcript.event_count-markers+1  # Failed technical pairs still occupy two positions.
+        pending = PendingMessage.model_validate(dict(record_type='pending_message',
+            message_id='pending_message:'+UUID(self.request_id).hex, request_id=self.request_id,
+            owner_user_id=self.profile.user_id, conversation_id=str(UUID(self.request.conversation_id)),
+            sequence=sequence,speaker='user',text=self.request.question,status='pending',
+            complete=True,created_at=self.created_at))
+        self.timeout()
+        self.tracking.retain_pending(pending)  # Retain exact immutable intent before writer entry.
+        self.timeout()
+        started = False
+        try:
+            started = True
+            self._read(self.storage.write_pending, pending)
+            raw = self._read(self.storage.exact_pending,self.request_id)
+            checked = verify_pending_message(raw,user_id=self.profile.user_id,
+                conversation_id=self.request.conversation_id,request_id=self.request_id,sequence=sequence)
+            if checked.record != pending:
+                raise ValueError('Intended pending save is unverified.')
+            self.timeout()
+            self.pending = pending
+            self._event('verified','pending_write')
+        finally:
+            if started and self.pending is None:
+                self.tracking.exclude_conversation(self.request.conversation_id)
+                self._event('unverified','pending_write')
+
+    def _classify_sources(self, destinations):
+        descriptors=[]
+        sources={}
+        for record in self.catalog.values():
+            destination='central_support' if record.subject=='company_wide' else record.subject
+            if destination not in destinations:
+                continue
+            identity='source_'+record.source_id.replace('-','_')
+            # Source questions/labels identify the requested class: NEVER send answer facts here.
+            text=record.source_question+'\n'+str({'subject':record.subject,
+                'eligible_audience':record.eligible_audience,'classification':record.classification,
+                'access_scope':record.access_scope})
+            descriptors.append(EvidenceCandidate(identity,'source_descriptor',record.source_id,
+                record.version,text,destination))
+            sources[identity]=record
+        if not descriptors:
+            return {},(),(),()
+        cache_key=tuple(row.excerpt_id for row in descriptors)
+        if cache_key not in self._descriptor_results:
+            self._descriptor_results[cache_key]=self._matching(self.request.question,descriptors,'descriptors')
+        kind,selected,uncertain=self._descriptor_results[cache_key]
+        # Secondary semantic decisions replace only the named descriptor judgments, never their access labels.
+        selected=tuple(row.excerpt_id for row in descriptors if self._semantic_sources.get(row.source_record_id)==
+            'relevant' or (row.source_record_id not in self._semantic_sources and row.excerpt_id in selected))
+        uncertain=tuple(row.excerpt_id for row in descriptors if self._semantic_sources.get(row.source_record_id)==
+            'uncertain' or (row.source_record_id not in self._semantic_sources and row.excerpt_id in uncertain))
+        if kind not in ('clear','insufficient'):
+            raise ValueError('Invalid descriptor matching result.')
+        chosen=self._select(descriptors,selected,uncertain)
+        uncertain_parts=tuple(dict.fromkeys(row.destination for row in descriptors if row.excerpt_id in uncertain))
+        permitted={}
+        refused,handoffs=[],[]
+        for descriptor in chosen:
+            record=sources[descriptor.excerpt_id]
+            disposition=source_disposition(record,role=self.profile.role,department=self.profile.home_department)
+            if disposition=='restricted':
+                refused.append(descriptor.destination)
+            elif disposition=='handoff':
+                handoffs.append(descriptor.destination)
+            else:
+                permitted.setdefault(descriptor.destination,[]).append(record.source_id)
+        if self.semantic_confidence_trigger is not None:
+            for descriptor in descriptors:
+                if descriptor.excerpt_id not in uncertain:
+                    continue
+                record=sources[descriptor.excerpt_id]
+                if source_disposition(record,role=self.profile.role,
+                                      department=self.profile.home_department)=='answerable':
+                    permitted.setdefault(descriptor.destination,[]).append(record.source_id)
+                    self._pending_sources.add(record.source_id)
+            return permitted,tuple(dict.fromkeys(refused)),tuple(dict.fromkeys(handoffs)),uncertain_parts
+        # An uncertain source class may change access/handoff; do not query facts for that destination.
+        permitted={part:ids for part,ids in permitted.items() if part not in uncertain_parts}
+        return permitted,tuple(dict.fromkeys(refused)),tuple(dict.fromkeys(handoffs)),uncertain_parts
+
+    def _finalize_current_sources(self, decision, permitted):
+        # A strong descriptor settles only its source's topic, never intent or factual relevance.
+        stable=tuple(part for part,ids in permitted.items()
+                     if any(identity not in self._pending_sources for identity in ids))
+        resolved_topics={'incoming.company_wide_topic' if part=='central_support'
+                         else 'incoming.topic_'+part for part in stable}
+        self._unresolved_judgments=[key for key in self._unresolved_judgments if key not in resolved_topics]
+        other_uncertainty=any(key.startswith('incoming.') and not (
+            key.startswith('incoming.topic_') or key in ('incoming.company_wide_topic','incoming.history_needed'))
+            for key in self._unresolved_judgments)
+        if not other_uncertainty:
+            self._pending_destinations.difference_update(stable)
+        # Keep established unsupported parts; absence of a source cannot disprove a requested topic.
+        self.destinations=() if 'incoming.intent' in self._unresolved_judgments else tuple(
+            dict.fromkeys((*decision.destinations,*stable)))
+
+    def _knowledge(self, destinations):
+        candidates = []
+        if not destinations:
+            return candidates
+        vector = self._model(self.models.embed,[self.request.question])[0]
+        for destination,source_ids in destinations.items():
+            where = knowledge_filter(role=self.profile.role,destination=destination)
+            where['$and'].append({'source_id':{'$in':source_ids}})
+            raw = self._read(self.storage.knowledge,vector,where=where,limit=4)
+            rows = _rows(raw,query=True)
+            if len(rows)>4:
+                raise ValueError('Knowledge response exceeds requested bound.')
+            for key,text,metadata in rows:
+                record = verify_knowledge(key,text,metadata,catalog=self.catalog,role=self.profile.role,
+                    department=self.profile.home_department,destination=destination)
+                if record is not None and key in source_ids:
+                    candidates.append(self._candidate(kind='knowledge',key=key,text=text,
+                        destination=destination,version=record.version,metadata=metadata,
+                        scope={'role':self.profile.role,'destination':destination}))
+        return candidates
+
+    def _history_transcript(self, conversation_id):
+        if self.tracking.excludes((conversation_id,)):
+            raise ValueError('Recalled conversation is unresolved.')
+        header = self._read(self.storage.header,conversation_id)
+        owned=verify_owned_conversation_header(header,user_id=self.profile.user_id,
+                                               conversation_id=conversation_id)
+        if owned.record is None:
+            raise ValueError('History conversation ownership is unverified.')
+        events = self._read(self.storage.events,conversation_id,limit=51)
+        if len(_rows(events))>50:
+            raise ValueError('History event cap exceeded.')
+        if conversation_id == str(UUID(self.request.conversation_id)):
+            # This request's exact-verified pending is not eligible history. Remove only that exact row.
+            rows = _rows(events)
+            for index,(key,text,metadata) in enumerate(rows):
+                if key == self.pending.message_id:
+                    checked=verify_pending_message({'ids':[key],'documents':[text],'metadatas':[metadata]},
+                        user_id=self.profile.user_id,conversation_id=conversation_id,
+                        request_id=self.request_id,sequence=self.pending.sequence)
+                    if checked.record != self.pending:
+                        raise ValueError('Active pending changed.')
+                    events={name:[value for i,value in enumerate(events[name]) if i!=index]
+                            for name in ('ids','documents','metadatas')}
+                    break
+        checked=verify_transcript_events(events,user_id=self.profile.user_id,conversation_id=conversation_id)
+        if checked.record is None:
+            raise ValueError('Incomplete history prefix.')
+        offers={key:self._read(self.storage.exact_offer,key) for key in checked.record.offer_ids}
+        verified=verify_complete_transcript(header,events,user_id=self.profile.user_id,
+            conversation_id=conversation_id,offer_results=offers)
+        if verified.record is None:
+            raise ValueError('Owned history cannot be reconstructed.')
+        if self.tracking.excludes((conversation_id,)):
+            raise ValueError('Recalled conversation became unresolved.')
+        return verified.record
+
+    def _history(self, target):
+        # Record at the owning lookup boundary, including ordinary and supplementary entry points.
+        try:
+            kind,candidates=self._history_candidates(target)
+        except Exception:
+            self._history_dispositions.append(PartDisposition('history','technical_failure'))
+            raise
+        if kind=='withheld':
+            return 'clear',[]  # The earlier denial stays the recorded outcome; this is not an absence.
+        if kind!='clear' or not candidates:
+            outcome='clarification_needed' if kind=='ambiguous' else (
+                'unavailable' if kind=='clear' else 'insufficient_evidence')
+            self._history_dispositions.append(PartDisposition('history',outcome))
+        return kind,candidates
+
+    def _history_candidates(self, target):
+        if self.searches >= 2:
+            raise ValueError('History-search budget exhausted.')
+        self.searches += 1
+        offset, seen, transcripts, candidates = 0,set(),{},[]
+        while True:
+            rows = _rows(self._read(self.storage.history_page,self.profile.user_id,offset=offset))
+            if not rows:
+                break  # Only an exhausted scan supports a complete candidate pool.
+            if len(rows)>100:
+                raise ValueError('History page exceeds native requested bound.')
+            for key,text,metadata in rows:
+                if key in seen or type(metadata) is not dict:
+                    raise ValueError('Invalid history candidate.')
+                seen.add(key)
+                conversation=str(UUID(metadata['conversation_id']))
+                checked=verify_terminal_outcome({'ids':[key],'documents':[text],'metadatas':[metadata]},
+                    user_id=self.profile.user_id,conversation_id=conversation,
+                    request_id=metadata['request_id'],sequence=metadata['sequence'])
+                if checked.record is None or checked.record.kind not in HISTORY_EVIDENCE_KINDS:
+                    raise ValueError('Ineligible or foreign completed-history candidate.')
+                if conversation not in transcripts:
+                    transcripts[conversation]=self._history_transcript(conversation)
+                exchange=next((item.exchange for item in transcripts[conversation].exchanges
+                    if item.exchange.terminal==checked.record),None)
+                if exchange is None:
+                    raise ValueError('History candidate has no verified complete exchange.')
+                candidates.append(self._candidate(kind='owned_history',key=key,
+                    text='User: '+exchange.pending.text+'\nAssistant: '+exchange.terminal.approved_text_or_code,
+                    destination='history',conversation=conversation,metadata=metadata,
+                    scope={'owner_user_id':self.profile.user_id,'kind':checked.record.kind}))
+            offset += len(rows)  # A short page is not proof that no older case exists.
+        found=bool(candidates)
+        candidates=[row for row in candidates if row.source_record_id not in self._withheld_history_ids]
+        if not candidates:
+            return ('withheld' if found else 'clear'),[]
+        kind,selected,uncertain = self._matching(target,candidates,f'history_{self.searches}')
+        if (kind=='uncertain' and self.history_identity_resolver is not None and not self._identity_attempted):
+            from shopunow.model_clients import HistoryIdentityResolution
+            self._identity_attempted=True  # Failed/invalid calls cannot create a second adjudication.
+            raw=self._model(self.history_identity_resolver,target,tuple(candidates))
+            resolved=HistoryIdentityResolution.model_validate(
+                raw.model_dump() if isinstance(raw,HistoryIdentityResolution) else raw,strict=True)
+            ids=resolved.selected_excerpt_ids
+            if (len(ids)!=len(set(ids)) or not set(ids)<={row.excerpt_id for row in candidates}
+                    or (resolved.status=='clear')!=bool(ids)):
+                raise ValueError('Invalid contributing historical exchange selection.')
+            stage=f'history_{self.searches}'
+            self._judgments[stage+'.identity_resolution']=resolved
+            kind,selected,uncertain=resolved.status,tuple(ids),()
+            if kind=='clear':
+                self._identity_selected_ids.update(ids)
+                replaced={stage+'.case_resolution',*(stage+'.'+identity for identity in ids)}
+                self._unresolved_judgments=[key for key in self._unresolved_judgments if key not in replaced]
+        chosen=self._select(candidates,selected,uncertain)
+        if kind not in ('clear','ambiguous','insufficient','uncertain'):
+            raise ValueError('Invalid history matching result.')
+        if uncertain and kind=='clear':
+            if self.semantic_confidence_trigger is None:
+                return 'uncertain',[]  # Preserve the frozen explicit-uncertainty policy when unconfigured.
+            # Identity is settled, but candidate contribution still needs semantic resolution.
+            chosen.extend(replace(row,relevance_basis='semantic_resolution') for row in candidates
+                          if row.excerpt_id in uncertain)
+        return kind,chosen if kind=='clear' else []
+
+    @staticmethod
+    def _select(candidates, selected, uncertain=()):
+        if (type(selected) not in (tuple,list) or len(selected)!=len(set(selected))
+                or type(uncertain) not in (tuple,list) or len(uncertain)!=len(set(uncertain))
+                or set(selected)&set(uncertain)
+                or not (set(selected)|set(uncertain))<= {row.excerpt_id for row in candidates}):
+            raise ValueError('Invalid relevance selection.')
+        chosen=set(selected)
+        return [replace(row,relevance_basis='typed_current_request') for row in candidates if row.excerpt_id in chosen]
+
+    def _clear(self, candidates, destinations):
+        retained=self._selected+self._resolution_candidates
+        recalled=tuple(row.conversation_id for row in candidates+retained
+                       if row.source_kind=='owned_history')
+        if recalled and self.tracking.excludes(recalled):
+            self._history_dispositions.append(PartDisposition('history','technical_failure'))
+            raise ValueError('Recalled evidence is held.')
+        if len(candidates)+len(retained)>20:
+            return EvidenceResult('insufficient_evidence',unresolved_parts=tuple(destinations))
+        for part in destinations:
+            if sum(row.destination in (part,'history','preference') for row in
+                    retained+candidates)>4:
+                return EvidenceResult('insufficient_evidence',unresolved_parts=tuple(destinations))
+        clean, uncertain = [],set()
+        # Across initial and supplementary work, retain a total of at most two ten-ID review batches.
+        for start in range(0,len(candidates),10):
+            if self._reviewed>=2:
+                if any(row.source_kind=='owned_history' for row in candidates[start:]):
+                    self._history_dispositions.append(PartDisposition('history','security_fallback'))
+                return EvidenceResult('security_fallback',unresolved_parts=tuple(destinations))
+            batch=candidates[start:start+10]
+            self._reviewed+=1
+            try:
+                verdicts=self._model(self.models.review,tuple(batch))
+                expected={row.excerpt_id for row in batch}
+                if (type(verdicts) is not list or len(verdicts)!=len(expected) or
+                    any(type(v) is not dict or set(v)!={'excerpt_id','verdict'} or
+                        v['verdict'] not in ('clean','malicious','uncertain') for v in verdicts) or
+                    {v['excerpt_id'] for v in verdicts}!=expected):
+                    raise ValueError('Invalid per-ID verdict mapping.')
+                mapping={v['excerpt_id']:v['verdict'] for v in verdicts}
+            except Exception:
+                if any(row.source_kind=='owned_history' for row in batch):
+                    self._history_dispositions.append(PartDisposition('history','security_fallback'))
+                return EvidenceResult('security_fallback',unresolved_parts=tuple(destinations))
+            clean.extend(replace(row,clearance='clean') for row in batch if mapping[row.excerpt_id]=='clean')
+            self._malicious_history_ids.update(row.excerpt_id for row in batch
+                if row.source_kind=='owned_history' and mapping[row.excerpt_id]=='malicious')
+            # Excerpt IDs change per search, so the stored record stays excluded for this request.
+            self._withheld_history_ids.update(row.source_record_id for row in batch
+                if row.source_kind=='owned_history' and mapping[row.excerpt_id]=='malicious')
+            if any(row.source_kind=='owned_history' and mapping[row.excerpt_id]=='uncertain' for row in batch):
+                self._history_dispositions.append(PartDisposition('history','security_fallback'))
+            uncertain.update(row.destination for row in batch if mapping[row.excerpt_id]=='uncertain')
+        historical=[row for row in candidates if row.source_kind=='owned_history']
+        if historical and all(row.excerpt_id in self._malicious_history_ids for row in historical):
+            self._history_dispositions.append(PartDisposition('history','unavailable'))
+        affected_parts=tuple(part for part in destinations if part in uncertain or
+                             'history' in uncertain or 'preference' in uncertain)
+        # Keep supported independent parts available; uncertain parts cannot receive answer context.
+        affected=set(affected_parts)
+        shared_uncertain='history' in uncertain or 'preference' in uncertain
+        clean=[row for row in retained+clean if row.destination not in affected
+               and not (shared_uncertain and row.destination in ('history','preference'))]
+        if 'incoming.intent' in self._unresolved_judgments:
+            # Identifying a case/topic cannot establish an informational rather than action request.
+            clean=[replace(row,relevance_basis='semantic_resolution') if row.source_kind in (
+                'knowledge','owned_history') else row for row in clean]
+        self._resolution_candidates=[row for row in clean if row.relevance_basis=='semantic_resolution']
+        self._selected=[row for row in clean if row.relevance_basis!='semantic_resolution']
+        unresolved=tuple(part for part in destinations if not any(
+            row.destination in (part,'history') for row in self._selected))
+        # This is availability, not semantic sufficiency: only later producers can assert full support.
+        unresolved=tuple(dict.fromkeys((*unresolved,*(part for part in destinations
+            if part in uncertain or 'history' in uncertain or 'preference' in uncertain))))
+        factual=any(row.source_kind in ('knowledge','owned_history') for row in self._selected)
+        blocked=bool(affected_parts) and (not factual or self.dependency!='independent')
+        kind='security_fallback' if blocked else 'ready' if factual else 'insufficient_evidence'
+        self.timeout()
+        recalled=tuple(row.conversation_id for row in clean if row.source_kind=='owned_history')
+        if recalled and self.tracking.excludes(recalled):
+            self._history_dispositions.append(PartDisposition('history','technical_failure'))
+            raise ValueError('Recalled evidence became unresolved during review.')
+        return EvidenceResult(kind,tuple(self._selected),unresolved,self.pending.message_id,
+                              self.request.response_style,affected_parts,
+                              getattr(self,'refused_parts',()),getattr(self,'handoff_parts',()))
+
+    def _with_dispositions(self, result, destinations):
+        # Every exit retains established part outcomes and the already verified pending link.
+        refused=tuple(dict.fromkeys((*getattr(self,'refused_parts',()),*result.refused_parts)))
+        handoffs=tuple(dict.fromkeys((*getattr(self,'handoff_parts',()),*result.handoff_parts)))
+        conflicts=tuple(part for part in refused if part in handoffs)
+        unresolved=tuple(dict.fromkeys((*result.unresolved_parts,*conflicts,*sorted(self._relevance_unresolved))))
+        kind=result.kind
+        factual=any(row.source_kind in ('knowledge','owned_history') for row in result.cleared)
+        if (kind=='insufficient_evidence' and not factual and destinations and not conflicts
+                and not self._relevance_unresolved):
+            # Do not hide an unsupported independent destination behind another part's refusal.
+            if not handoffs and set(destinations)<=set(refused):
+                kind='refusal'
+            elif not refused and set(destinations)<=set(handoffs):
+                kind='handoff_needed'
+        pending=result.pending_message_id or (None if self.pending is None else self.pending.message_id)
+        if self._history_outcome=='ambiguous' and kind in ('ready','insufficient_evidence'):
+            kind='clarification_needed'  # Useful independent facts do not resolve the historical reference.
+        candidates=tuple(row for row in self._resolution_candidates
+                         if row.source_kind!='owned_history' or row.source_record_id in self._history_access_ids) if kind in (
+            'ready','insufficient_evidence','clarification_needed') else ()
+        return replace(result,kind=kind,refused_parts=refused,handoff_parts=handoffs,
+                       unresolved_parts=unresolved,pending_message_id=pending,
+                       resolution_candidates=candidates,judgments=MappingProxyType(dict(self._judgments)),
+                       unresolved_judgments=tuple(dict.fromkeys(self._unresolved_judgments)),
+                       dispositions=tuple(dict.fromkeys((*result.dispositions,*self._history_dispositions,
+                           *(PartDisposition(part,'refusal') for part in refused),
+                           *(PartDisposition(part,'handoff_needed') for part in handoffs),
+                           *(PartDisposition(part,'security_fallback') for part in result.security_fallback_parts),
+                           *((PartDisposition('action','handoff_needed'),) if
+                             getattr(self,'_action_required',False) else ())))))
+
+    def prepare(self, decision):
+        # Routing dispositions already exist even if pending persistence or classification fails.
+        self.refused_parts=decision.refused_departments
+        self.handoff_parts=()
+        self._action_required=decision.requires_action_handoff
+        result=self._prepare(decision)
+        destinations=getattr(self,'destinations',decision.destinations)
+        result=replace(self._with_dispositions(result,destinations),destinations=destinations,
+                       dependency=getattr(self,'dependency',decision.dependency),
+                       requires_action_handoff=self._action_required)
+        try:
+            result=self._adjudicate_candidates(result)
+            result=replace(self._with_dispositions(result,destinations),destinations=destinations)
+        except Exception:
+            # Failure withholds only unconfirmed candidates; evidence already admitted remains usable.
+            factual=any(row.source_kind in ('knowledge','owned_history') for row in result.cleared)
+            withheld=result.resolution_candidates
+            history_failed=any(row.source_kind=='owned_history' for row in withheld)
+            result=replace(result,kind=result.kind if factual else 'technical_failure',
+                cleared=result.cleared if factual else (),resolution_candidates=(),
+                unresolved_parts=tuple(dict.fromkeys((*result.unresolved_parts,*(row.destination for row in withheld)))),
+                dispositions=tuple(dict.fromkeys((*result.dispositions,*((PartDisposition('history','technical_failure'),)
+                    if history_failed else ())))))
+        allowed={'ready','refusal','handoff','handoff_needed','clarification','clarification_needed',
+                 'insufficient_evidence','security_fallback','technical_failure','confirmed_attack',
+                 'security_uncertain','dependency_failure','disabled','stopped'}
+        self._event(result.kind if result.kind in allowed else 'technical_failure','evidence_preparation')
+        return result
+
+    def _prepare(self, decision):
+        if decision.kind not in ('continue','history_resolution','semantic_resolution'):
+            return EvidenceResult(decision.kind)
+        if not self.attempt.authorize_normal_work():
+            return EvidenceResult('stopped')
+        try:
+            historical_refusal=False
+            if decision.judgments is not None:
+                self._judgments.update(('incoming.'+key,value) for key,value in decision.judgments.items())
+                if self.semantic_confidence_trigger is not None:
+                    for key,value in decision.judgments.items():
+                        if key in ('severity','prompt_injection','sql_injection','profile_override_attempt','access_concern'):
+                            continue  # Security and operating precedence keep their own approved rules.
+                        if key=='sentiment':
+                            continue  # Only a negative label escalates (upstream); its confidence never holds back evidence.
+                        if not semantic_confident(value,self.semantic_confidence_trigger):
+                            self._unresolved_judgments.append('incoming.'+key)
+                            if key=='company_wide_topic' or key.startswith('topic_'):
+                                self._pending_destinations.add('central_support' if key=='company_wide_topic'
+                                                               else key.removeprefix('topic_'))
+                            else:
+                                self._pending_destinations.update(decision.proposed_destinations)
+            if decision.kind=='semantic_resolution':
+                self._save_pending()
+                decision=self._adjudicate_route(decision)
+                if decision.kind!='continue':
+                    return EvidenceResult(decision.kind if decision.kind!='semantic_resolution'
+                                          else 'insufficient_evidence')
+            if decision.kind=='history_resolution':
+                # This is pre-dispatch owned-case discovery, never an empty ordinary route.
+                decision,result=self._resolve_history(decision)
+                if result is not None:
+                    return result
+                historical_refusal=bool(decision.refused_departments)
+            possible=tuple(part for part in decision.proposed_destinations
+                if self.profile.role!='customer' or part not in ('hr','it_support','facilities_admin'))
+            lookups=tuple(dict.fromkeys((*decision.destinations,*(possible if
+                self.semantic_confidence_trigger is not None else ()))))
+            if not lookups and self.semantic_confidence_trigger is not None and self._unresolved_judgments:
+                if self.pending is None:
+                    self._save_pending()
+                self._relevance_unresolved.update(decision.proposed_destinations)
+                return EvidenceResult('insufficient_evidence')  # An unresolved restricted hint grants no facts.
+            if not lookups or len(set(decision.destinations))!=len(decision.destinations):
+                raise ValueError('Invalid validated route.')
+            # Validate every scope before any write/model/lookup can begin.
+            for destination in lookups:
+                knowledge_filter(role=self.profile.role,destination=destination)
+            if self.pending is None:
+                self._save_pending()  # Case discovery already verified this exact pending intent.
+            self.dependency=decision.dependency
+            self.destinations=decision.destinations
+            permitted,refused,handoffs,uncertain_parts=(self._source_classification if
+                self._source_classification is not None else self._classify_sources(lookups))
+            if self.answer_models is not None and (uncertain_parts or self._unresolved_judgments):
+                decision=self._adjudicate_route(decision)
+                if decision.kind!='continue':
+                    return EvidenceResult(decision.kind)
+                self.dependency=decision.dependency
+                self.destinations=decision.destinations
+                lookups=tuple(dict.fromkeys((*lookups,*decision.destinations)))
+                for destination in lookups:
+                    knowledge_filter(role=self.profile.role,destination=destination)
+                permitted,refused,handoffs,uncertain_parts=self._classify_sources(lookups)
+            if self.semantic_confidence_trigger is not None:
+                self._finalize_current_sources(decision,permitted)
+            self._relevance_unresolved.update(uncertain_parts)
+            self.refused_parts=tuple(dict.fromkeys((*decision.refused_departments,*refused)))
+            self.handoff_parts=handoffs
+            if self.dependency!='independent' and self.refused_parts:
+                return EvidenceResult('refusal',refused_parts=self.refused_parts)
+            # Current-source dispositions do not block an independently requested owned-history lookup.
+            if (not permitted and (refused or handoffs) and not uncertain_parts and not decision.history_needed
+                    and not any(row.source_kind=='owned_history' and row.clearance=='clean' for row in self._selected)):
+                return EvidenceResult('refusal' if refused else 'handoff_needed',
+                    refused_parts=self.refused_parts,handoff_parts=handoffs)
+            candidates=self._knowledge(permitted)
+            if candidates:
+                kind,selected,uncertain=self._matching(self.request.question,candidates,'knowledge')
+                if kind not in ('clear','insufficient'):
+                    raise ValueError('Invalid Knowledge relevance result.')
+                self._relevance_unresolved.update(row.destination for row in candidates if row.excerpt_id in uncertain)
+                chosen=self._select(candidates,selected,uncertain)
+                if self.semantic_confidence_trigger is not None:
+                    chosen.extend(replace(row,relevance_basis='semantic_resolution') for row in candidates
+                                  if row.excerpt_id in uncertain)
+                    chosen=[replace(row,relevance_basis='semantic_resolution') if (
+                        row.source_record_id in self._pending_sources or row.destination in self._pending_destinations
+                        ) else row for row in chosen]
+                    self._relevance_unresolved.update(row.destination for row in chosen
+                                                     if row.relevance_basis=='semantic_resolution')
+                candidates=chosen
+            history_kind='clear'
+            if decision.history_needed:
+                history_kind,history=self._history(self.request.question)
+                if history_kind!='clear':
+                    self._relevance_unresolved.update(decision.destinations)
+                candidates.extend(history)
+            if self.request.response_style is not None:
+                candidates.append(self._candidate(kind='preference',key='response_style',
+                    text=self.request.response_style,destination='preference'))
+            result=self._clear(candidates,lookups)
+            result=self._authorize_identity_history(result,self.request.question)
+            routing=self._judgments.get('semantic.routing')
+            if getattr(routing,'status',None)=='resolved':
+                # A search hint the adjudicator did not route was never a requested part.
+                hints=set(lookups)-set(self.destinations)
+                self._relevance_unresolved.difference_update(hints)
+                result=replace(result,unresolved_parts=tuple(part for part in result.unresolved_parts
+                                                             if part not in hints))
+            if result.kind=='insufficient_evidence' and historical_refusal:
+                # Denied shared history cannot support the permitted recap; retain its clarification.
+                self.destinations=()  # No allowed context is available for a producer dispatch.
+                return replace(result,kind='clarification_needed')
+            if result.kind in ('ready','insufficient_evidence') and history_kind=='ambiguous':
+                # Retain independent clean context, but do not hide a genuinely ambiguous reference.
+                result=replace(result,kind='clarification_needed')
+            return replace(result,unresolved_parts=tuple(dict.fromkeys(
+                (*result.unresolved_parts,*self.refused_parts,*self.handoff_parts))))
+        except Exception:
+            return EvidenceResult('technical_failure')  # No raw exceptions or source text in operational output.
+
+    def _authorize_identity_history(self,result,target):
+        # D1 has its own pre-dispatch access phase. These other entry points must enforce it too.
+        history=tuple(row for row in self._selected+self._resolution_candidates
+                      if row.source_kind=='owned_history'
+                      and row.source_record_id not in self._history_access_ids)
+        if not history or result.kind not in ('ready','insufficient_evidence'):
+            return result
+        from shopunow.workflow import permitted_routes
+        answers=self._historical_access(target,history)
+        recalled=tuple(row.conversation_id for row in self._selected+self._resolution_candidates
+                       if row.source_kind=='owned_history')
+        if self.tracking.excludes(recalled):
+            self._history_dispositions.append(PartDisposition('history','technical_failure'))
+            raise ValueError('Recalled evidence became unresolved during historical access.')
+        stage=f'history_access_{self.searches}.'
+        self._judgments.update((stage+key,value) for key,value in answers.items())
+        unsettled=[stage+key for key,value in answers.items()
+                   if not semantic_confident(value,self.semantic_confidence_trigger)]
+        destinations,refused,dependency=permitted_routes(answers,role=self.profile.role,
+            topic_trigger=self.topic_trigger,semantic_confidence_trigger=self.semantic_confidence_trigger)
+        self._unresolved_judgments.extend(unsettled)
+        weak_intent='incoming.intent' in self._unresolved_judgments
+        # Customers: only a weak restricted or currently answered topic can change this access decision.
+        guarded={stage+'topic_'+part for part in ('hr','it_support','facilities_admin')}|{
+            stage+('company_wide_topic' if part=='central_support' else 'topic_'+part) for part in self.destinations}
+        # The explicit subject check protects employees; customers keep a confident route for what matters.
+        released=self.profile.role=='employee' or (not guarded.intersection(unsettled) and bool(destinations)
+            and (weak_intent or set(destinations)<=set(self.destinations)))
+        if self._history_subject=='allowed' and released and not refused:
+            self._history_access_ids.update(row.source_record_id for row in history)
+            return result
+        # No partition of shared history by subject exists. Withhold the whole newly selected set.
+        self._withheld_history_ids.update(row.source_record_id for row in history)
+        excluded={row.excerpt_id for row in history}
+        self._selected=[row for row in self._selected if row.excerpt_id not in excluded]
+        self._resolution_candidates=[row for row in self._resolution_candidates if row.excerpt_id not in excluded]
+        self.refused_parts=tuple(dict.fromkeys((*self.refused_parts,*refused)))
+        self._history_dispositions.append(PartDisposition('history','refusal' if refused or
+            self._history_subject=='restricted' else 'insufficient_evidence'))
+        self._relevance_unresolved.add('history')
+        factual=any(row.source_kind in ('knowledge','owned_history') for row in self._selected)
+        kind='refusal' if refused and (not factual or dependency!='independent') else (
+            'ready' if factual else 'insufficient_evidence')
+        if kind=='refusal':
+            self._selected=[]
+            self._resolution_candidates=[]
+        uncovered=tuple(part for part in self.destinations if not any(
+            row.destination in (part,'history') for row in self._selected))
+        return replace(result,kind=kind,cleared=tuple(self._selected),
+            unresolved_parts=tuple(dict.fromkeys((*result.unresolved_parts,*uncovered))))
+
+    def _recover_current(self,decision,kind):
+        """An unresolved recap cannot identify a route; current descriptors may identify independent help."""
+        if self.semantic_confidence_trigger is not None:
+            self._history_outcome=kind
+            self._relevance_unresolved.add('history')
+            if self.answer_models is not None:
+                decision=self._adjudicate_route(decision,history_status=kind)
+                if decision.kind!='continue':
+                    return decision,EvidenceResult(decision.kind)
+            dependency=(decision.judgments or {}).get('department_dependency')
+            if (decision.dependency=='independent' and decision.proposed_destinations
+                    and (self._semantic_dependency or dependency is None or semantic_confident(dependency,self.semantic_confidence_trigger))
+                    and decision.intent=='information' and not decision.requires_action_handoff):
+                possible=tuple(part for part in decision.proposed_destinations if self.profile.role!='customer'
+                               or part not in ('hr','it_support','facilities_admin'))
+                classified=self._classify_sources(possible)
+                permitted,refused,handoffs,uncertain=classified
+                self._relevance_unresolved.update(uncertain)
+                if permitted:
+                    self._source_classification=classified
+                    self._finalize_current_sources(decision,permitted)
+                    return replace(decision,kind='continue',destinations=self.destinations,
+                        proposed_destinations=tuple(permitted),history_needed=False),None
+                self.refused_parts=tuple(dict.fromkeys((*self.refused_parts,*refused)))
+                self.handoff_parts=handoffs
+        return decision,EvidenceResult('clarification_needed' if kind=='ambiguous' else 'insufficient_evidence')
+
+    def _restricted_history_subjects(self):
+        # Customers are refused by topic; employees need the exact internal subjects closed to them.
+        if self.profile.role!='employee':
+            return ()
+        return tuple({'source_id':row.source_id,'subject':row.subject,'source_question':row.source_question}
+            for row in self.catalog.values() if row.access_scope=='home_department_internal'
+            and source_disposition(row,role=self.profile.role,department=self.profile.home_department)=='restricted')
+
+    def _historical_access(self,target,history):
+        # Routing this exact history is also an authoritative failure boundary, separate from matching.
+        try:
+            subjects=self._restricted_history_subjects()
+            answers=dict(self._model(self.models.history_route,target,history,
+                role=self.profile.role,home_department=self.profile.home_department,
+                **({'restricted_subjects':subjects} if subjects else {})))
+            subject=answers.pop(HISTORY_SUBJECT_FIELD,None)
+            if subject is not None:
+                self._judgments['history_access.'+HISTORY_SUBJECT_FIELD]=subject
+            # Only a confident negative releases history; every other answer withholds it.
+            self._history_subject=('allowed' if not subjects or (subject is not None and subject.choice=='not_restricted'
+                and self.semantic_confidence_trigger is not None  # Access never treats an unset trigger as confident.
+                and semantic_confident(subject,self.semantic_confidence_trigger)) else
+                'restricted' if subject is not None and subject.choice=='restricted' else 'unclear')
+            recalled=tuple(row.conversation_id for row in self._selected+self._resolution_candidates
+                           if row.source_kind=='owned_history')
+            if self.tracking.excludes(recalled):
+                raise ValueError('Recalled evidence became unresolved during historical routing.')
+            return answers
+        except Exception:
+            self._history_dispositions.append(PartDisposition('history','technical_failure'))
+            raise
+
+    def _resolve_history(self,decision):
+        from shopunow.incoming import _number
+        from shopunow.workflow import permitted_routes
+        _number(self.topic_trigger)
+        if (decision.destinations or decision.refused_departments or not decision.history_needed
+                or decision.intent!='information' or decision.requires_action_handoff):
+            raise ValueError('Invalid pre-dispatch history phase.')
+        self.dependency=decision.dependency
+        self._save_pending()
+        kind,candidates=self._history(self.request.question)
+        if kind!='clear':
+            return self._recover_current(decision,kind)
+        # A single unresolved recap still has the existing four-per-part cap before routing.
+        reviewed=self._clear(candidates,('history',))
+        if reviewed.kind!='ready' and not (reviewed.kind=='insufficient_evidence' and self._resolution_candidates):
+            if reviewed.kind=='insufficient_evidence' and (not candidates or
+                    {row.excerpt_id for row in candidates}<=self._malicious_history_ids):
+                # No usable historical match: independently requested current help may still be supported.
+                return self._recover_current(decision,'insufficient')
+            return decision,reviewed  # Review failures and capacity limits do not authorize recovery.
+        answers=self._historical_access(self.request.question,tuple(self._selected+self._resolution_candidates))
+        for key,answer in answers.items():
+            self._judgments['history_route.'+key]=answer
+        # A confident code-owned refusal is settled here; adjudication cannot replace or narrow it.
+        destinations,refused,dependency=permitted_routes(answers,role=self.profile.role,
+            topic_trigger=self.topic_trigger,semantic_confidence_trigger=self.semantic_confidence_trigger)
+        decision=replace(decision,refused_departments=refused,dependency=dependency)
+        if semantic_confident(answers['department_dependency'],self.semantic_confidence_trigger):
+            # The confident route about this exact history replaces the earlier incoming estimate.
+            self._unresolved_judgments=[key for key in self._unresolved_judgments
+                                        if key!='incoming.department_dependency']
+        self.refused_parts=refused
+        denied=self._history_subject=='restricted' or bool(refused)
+        withheld=denied or self._history_subject!='allowed'
+        if withheld:
+            # Denied or unclear history leaves here, before routing adjudication or any producer.
+            self._withheld_history_ids.update(row.source_record_id for row in
+                                              self._selected+self._resolution_candidates)
+            self._selected=[]
+            self._resolution_candidates=[]
+            if self._history_subject!='allowed':
+                self._relevance_unresolved.add('history')  # A topic refusal is already its own reported outcome.
+            self._history_dispositions.append(PartDisposition('history','refusal'
+                if denied else 'insufficient_evidence'))
+        if refused and dependency!='independent' and semantic_confident(answers['department_dependency'],
+                                                                        self.semantic_confidence_trigger):
+            # Nothing can be answered without the refused part, so no adjudicator reply can change the outcome.
+            self.dependency=dependency
+            return decision,EvidenceResult('refusal',refused_parts=refused,unresolved_parts=destinations)
+        adjudicated=None
+        if self.semantic_confidence_trigger is not None:
+            unsettled=[key for key,answer in answers.items()
+                       if not semantic_confident(answer,self.semantic_confidence_trigger)]
+            if unsettled:
+                self._unresolved_judgments.extend('history_route.'+key for key in unsettled)
+                if self.answer_models is not None:
+                    adjudicated=self._adjudicate_route(decision,
+                        history=tuple(self._selected+self._resolution_candidates),
+                        history_status='withheld' if withheld else 'clear')
+                if adjudicated is None or adjudicated.kind not in ('continue','refusal'):
+                    self._selected=[]
+                    self._resolution_candidates=[]
+                    return self._recover_current(adjudicated or decision,'uncertain')
+            # A new resolved subject replaces initial topic uncertainty rather than inheriting it.
+            self._unresolved_judgments=[key for key in self._unresolved_judgments if not (
+                key.startswith('incoming.topic_') or key in ('incoming.company_wide_topic','incoming.history_needed'))]
+            self._pending_destinations.clear()
+        if adjudicated is not None:
+            decision=adjudicated
+            destinations,refused,dependency=decision.destinations,decision.refused_departments,decision.dependency
+        self.refused_parts=refused
+        self.dependency=dependency
+        if withheld and (not destinations or dependency!='independent'):
+            return decision,EvidenceResult('refusal' if denied else 'insufficient_evidence',
+                refused_parts=refused,unresolved_parts=destinations)
+        if refused:
+            self._history_dispositions.append(PartDisposition('history','refusal'))
+            # Shared history has no per-subject permission partition: never pass denied context onward.
+            self._withheld_history_ids.update(row.source_record_id for row in
+                                              self._selected+self._resolution_candidates)
+            self._selected=[]
+            self._resolution_candidates=[]
+            if not destinations or dependency!='independent':
+                return decision,EvidenceResult('refusal',refused_parts=refused,unresolved_parts=destinations)
+            # Independent allowed current work still uses ordinary filtered source preparation.
+        if not destinations:
+            self._selected=[]
+            self._resolution_candidates=[]
+            return decision,EvidenceResult('handoff_needed')
+        if not refused:
+            self._history_access_ids.update(row.source_record_id for row in
+                                            self._selected+self._resolution_candidates)
+        self.destinations=destinations  # First route finalization, before Knowledge or producer dispatch.
+        return replace(decision,kind='continue',destinations=destinations,dependency=dependency,
+                       refused_departments=refused,history_needed=False,
+                       proposed_destinations=destinations),None  # Do not restore old search hints.
+
+    def supplementary(self, *, target,work_timeout=None):
+        # Supplementary insufficiency must not erase independently established refused parts.
+        destinations=getattr(self,'destinations',())
+        previous=self._work_timeout
+        self._work_timeout=work_timeout
+        try:
+            return replace(self._with_dispositions(self._supplementary(target=target),destinations),
+                           destinations=destinations,dependency=getattr(self,'dependency','unclear'),
+                           requires_action_handoff=getattr(self,'_action_required',False))
+        finally:
+            self._work_timeout=previous  # Only the owned supplementary task mutates this service at this point.
+
+    def _supplementary(self, *, target):
+        # Only a later producer's code-validated context-needed continuation calls this seam.
+        if (self.pending is None or self._supplemented or type(target) is not str
+                or not target.strip() or len(target)>2000):
+            return EvidenceResult('technical_failure')
+        self._supplemented=True  # One producer continuation, even when no initial history search ran.
+        try:
+            kind,candidates=self._history(target)
+            if kind!='clear':
+                # Only the searched history is unresolved; other answered parts keep their own outcomes.
+                self._relevance_unresolved.add('history')
+                return EvidenceResult('clarification_needed' if kind=='ambiguous' else 'insufficient_evidence')
+            existing={(row.source_kind,row.source_record_id,row.source_version) for row in
+                      self._selected+self._resolution_candidates}
+            candidates=[row for row in candidates if
+                        (row.source_kind,row.source_record_id,row.source_version) not in existing]
+            if candidates and self._reviewed>=2:
+                # Owner decision: unreviewed history stays unused; reaching the limit is not a security finding.
+                self._history_dispositions.append(PartDisposition('history','insufficient_evidence'))
+                candidates=[]
+            if not candidates:
+                return EvidenceResult('insufficient_evidence',tuple(self._selected),
+                                      ('history',),self.pending.message_id)
+            result=self._clear(candidates,self.destinations)
+            result=self._authorize_identity_history(result,target)
+            new_ids={row.excerpt_id for row in candidates}
+            if result.kind=='ready' and not any(row.source_kind=='owned_history' and
+                    row.excerpt_id in new_ids for row in result.cleared):
+                return replace(result,kind='insufficient_evidence',unresolved_parts=('history',))
+            return result
+        except Exception:
+            return EvidenceResult('technical_failure')
+
+
+# Flow: actual routing clearance -> retain/add/exact-read pending -> scoped candidates
+# -> independent source/owner/prefix verification -> relevance -> exact per-ID review -> clean producer input.

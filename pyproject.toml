@@ -1,0 +1,66 @@
+[build-system]
+requires = ["uv_build==0.13.9"]
+build-backend = "uv_build"
+
+[project]
+name = "shopunow"
+version = "0.1.0"
+description = "ShopUNow application: local validation and admission components"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "chromadb==1.5.9",
+    "fastapi==0.143.2",
+    "fastapi-cli==0.0.34",
+    "langgraph==1.2.20",
+    "limits==5.8.0",
+    "openai==3.46.0",
+    "pydantic==2.14.1",
+    "starlette==1.8.0",
+    "typesafe-sdk==0.7.5",
+    "uvicorn==0.54.0",
+]
+
+[dependency-groups]
+deploy = [
+    "fastapi-cloud-cli==0.28.0",
+]
+dev = [
+    "httpx==0.28.1",
+    "ruff==0.17.3",
+]
+
+[tool.uv]
+package = true  # Install shopunow as a package so the host imports it without PYTHONPATH.
+# Preserve applicable historical lock resolutions without copying its project metadata.
+constraint-dependencies = [
+    "annotated-doc==0.0.5",
+    "annotated-types==0.8.0",
+    "anyio==4.15.1",
+    "certifi==2026.7.22",
+    "deprecated==3.0.0",
+    "fastapi==0.143.2",
+    "h11==0.16.0",
+    "httpcore==1.0.9",
+    "httpx==0.28.1",
+    "idna==3.20",
+    "opentelemetry-api==1.45.1",
+    "packaging==26.3",
+    "pydantic==2.14.1",
+    "pydantic-core==2.50.1",
+    "starlette==1.8.0",
+    "typing-extensions==4.16.0",
+    "typing-inspection==0.4.4",
+    "wrapt==2.5.1",
+]
+
+[tool.ruff]
+# Match the project's supported Python syntax and pinned lint executable.
+target-version = "py312"
+required-version = "==0.17.3"
+
+[tool.ruff.lint]
+# Start with basic error and Pyflakes checks; leave the formatter unused.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.fastapi]
+entrypoint = "shopunow.hosted_app:app"

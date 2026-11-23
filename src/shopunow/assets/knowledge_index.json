@@ -1,0 +1,926 @@
+{
+  "entries": {
+    "SU-BP-001": {
+      "digest": "3ddbc7c530d15b8a573c86bc2f9711e1d9a41a89115d691be20e1e4884796d2f",
+      "metadata": {
+        "access_scope": "customer_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-BP-001",
+        "subject": "billing_payments",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-BP-002": {
+      "digest": "5f37b3631b106766c1da55793467916c7303ac775ed106aaea06587b18a5f55c",
+      "metadata": {
+        "access_scope": "customer_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-BP-002",
+        "subject": "billing_payments",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-BP-003": {
+      "digest": "c7a30fbb22577edadcf7d66eebca25b0683a81b359c88cb372154ab0255313d2",
+      "metadata": {
+        "access_scope": "customer_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-BP-003",
+        "subject": "billing_payments",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-BP-004": {
+      "digest": "8bea377b5a86af1b1c288babbd5a26c839502979493e38ea94188576b51c6f17",
+      "metadata": {
+        "access_scope": "customer_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-BP-004",
+        "subject": "billing_payments",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-BP-005": {
+      "digest": "8b03cf86815ca92e87db606062156cfe05d17c0101473f4e58daef5772052b88",
+      "metadata": {
+        "access_scope": "customer_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-BP-005",
+        "subject": "billing_payments",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-BP-006": {
+      "digest": "94b865931996db64eda714bbdf6c4c9f62c14bcb37d297a202d6ce4e161f8f06",
+      "metadata": {
+        "access_scope": "customer_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-BP-006",
+        "subject": "billing_payments",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-BP-007": {
+      "digest": "309be038fa747e21f88fb250d6f915230c5c52851ad148e477201d39119010ec",
+      "metadata": {
+        "access_scope": "customer_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-BP-007",
+        "subject": "billing_payments",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-BP-008": {
+      "digest": "5b15041fc498c1b0bc84ff61ebd1034ef02bee0b0715ef037151676706b1b7ac",
+      "metadata": {
+        "access_scope": "customer_personal_handoff",
+        "approval_status": "owner_approved",
+        "classification": "non_general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-BP-008",
+        "subject": "billing_payments",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-BP-009": {
+      "digest": "6f91cc748c9cb3337ed57266abbfebf9d936e3788a23f658f8b5f9a2838e74cb",
+      "metadata": {
+        "access_scope": "customer_personal_handoff",
+        "approval_status": "owner_approved",
+        "classification": "non_general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-BP-009",
+        "subject": "billing_payments",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-BP-010": {
+      "digest": "532c1478cbff6797b75bee0a7dddf36af86f9bf45716e50c0e3716196097b4ac",
+      "metadata": {
+        "access_scope": "customer_personal_handoff",
+        "approval_status": "owner_approved",
+        "classification": "non_general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-BP-010",
+        "subject": "billing_payments",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-CW-001": {
+      "digest": "c658774f290bfa22d61d3b5318fa285dd365f5681f728a0739065c3489563f51",
+      "metadata": {
+        "access_scope": "company_wide",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-CW-001",
+        "subject": "company_wide",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-CW-002": {
+      "digest": "e1206bce6a9db75099a4082a0aad063042cdf080b928227fc544a9004e7320d7",
+      "metadata": {
+        "access_scope": "company_wide",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-CW-002",
+        "subject": "company_wide",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-CW-003": {
+      "digest": "4ecc886a52a37f001a6c05d73c0c9b4fb2805b1c1d18428a190b9fa1997751b7",
+      "metadata": {
+        "access_scope": "company_wide",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee",
+          "customer"
+        ],
+        "source_id": "SU-CW-003",
+        "subject": "company_wide",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-CW-004": {
+      "digest": "c1568a65690c76d56c077196a4766805e98e30c15a457471665810ee0e5822c9",
+      "metadata": {
+        "access_scope": "company_wide",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee",
+          "customer"
+        ],
+        "source_id": "SU-CW-004",
+        "subject": "company_wide",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-FA-001": {
+      "digest": "34c3c22f8af6640ccaf369d2802e04c084d29c3b65919746db3617161ef8db99",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-FA-001",
+        "subject": "facilities_admin",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-FA-002": {
+      "digest": "d31aa744306c059dfe67f248407694ebe78ce0bb75305433e0969acc923fae4a",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-FA-002",
+        "subject": "facilities_admin",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-FA-003": {
+      "digest": "267cce41623ebf638769d790d2fa55f794f583b4438643f365e22da2e2282c21",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-FA-003",
+        "subject": "facilities_admin",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-FA-004": {
+      "digest": "cda425918aec271cb91e65a5d1a46b5849677bb4a12ffe157aaa12fe30142c8d",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-FA-004",
+        "subject": "facilities_admin",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-FA-005": {
+      "digest": "593a5643b1a8f429e6a8f995a4825d73f112c0306f45b25a8d0ce470f6a98d57",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-FA-005",
+        "subject": "facilities_admin",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-FA-006": {
+      "digest": "27c7801bb4b348bb36d993cbfac6412dfdeaafb3422f2a460fe441cb1f7ca774",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-FA-006",
+        "subject": "facilities_admin",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-FA-007": {
+      "digest": "b276bc1d8e5a66b4d25429c607c38bab6656a1b0e52e3efa407ce34c3704909f",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-FA-007",
+        "subject": "facilities_admin",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-FA-008": {
+      "digest": "eb0abf5b3309fdc4761f57b17155b8e5cb91d30937a8194d12c2f870df16c878",
+      "metadata": {
+        "access_scope": "employee_personal_handoff",
+        "approval_status": "owner_approved",
+        "classification": "non_general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-FA-008",
+        "subject": "facilities_admin",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-FA-009": {
+      "digest": "330a7b63056fa74ab00b02ca67943cca637f78e08d9bbdc430d178cf6373e685",
+      "metadata": {
+        "access_scope": "employee_personal_handoff",
+        "approval_status": "owner_approved",
+        "classification": "non_general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-FA-009",
+        "subject": "facilities_admin",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-FA-010": {
+      "digest": "6a475c20104c485dea3f228bcef02d7d9b56c62c5af27c9881276411a155bb66",
+      "metadata": {
+        "access_scope": "home_department_internal",
+        "approval_status": "owner_approved",
+        "classification": "non_general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-FA-010",
+        "subject": "facilities_admin",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-HR-001": {
+      "digest": "eee7e0fa50b9f02d40f198d780036f93346ade14eebdfd411e7cb8c9a0cd8f29",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-HR-001",
+        "subject": "hr",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-HR-002": {
+      "digest": "970f0ec4b5f20f5c1554f24ec922ea2ae263b3e478c4b96f69f26093879815a2",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-HR-002",
+        "subject": "hr",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-HR-003": {
+      "digest": "822c1846cf765ad9ea46fad5b1eea01525dad308fdc0e279a10397e6adf086d4",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-HR-003",
+        "subject": "hr",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-HR-004": {
+      "digest": "e087e4bffecaf9ad3ac85f6565f6880edca667619f70858833af8b6f2c09bc46",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-HR-004",
+        "subject": "hr",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-HR-005": {
+      "digest": "2af2bbce1267846e1def2eec5bff2ee8590e9afd789c04caa87164c5bd13d41f",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-HR-005",
+        "subject": "hr",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-HR-006": {
+      "digest": "97c9994b96961c82340517fd60f290335a5af681c4cd9fb608c6ca6eb4fa956e",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-HR-006",
+        "subject": "hr",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-HR-007": {
+      "digest": "600461d7b2a24791ad852485908615e46a69059ba36919d1638d89f67c47b997",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-HR-007",
+        "subject": "hr",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-HR-008": {
+      "digest": "fa478ba0adf5023ece4f0117d12653455a1cf6feaa35daec12f0744bb7d62088",
+      "metadata": {
+        "access_scope": "employee_personal_handoff",
+        "approval_status": "owner_approved",
+        "classification": "non_general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-HR-008",
+        "subject": "hr",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-HR-009": {
+      "digest": "1a931dc9647302a7bfeca6160757522cd9a8b8a1a50f36022996da1fe70e6e3c",
+      "metadata": {
+        "access_scope": "employee_personal_handoff",
+        "approval_status": "owner_approved",
+        "classification": "non_general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-HR-009",
+        "subject": "hr",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-HR-010": {
+      "digest": "9ea901a64c08a660f667a37b3185843d383fb90cf880e515b75e600d9779b182",
+      "metadata": {
+        "access_scope": "home_department_internal",
+        "approval_status": "owner_approved",
+        "classification": "non_general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-HR-010",
+        "subject": "hr",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-IT-001": {
+      "digest": "33058190b40a1b7294ac088dfc09f07607dca8ebe6f32f85188e19ea48fe51b3",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-IT-001",
+        "subject": "it_support",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-IT-002": {
+      "digest": "aa6b9defa76585c6fe1686c826565b3c6740bcd7c49c4001073d4eb272efb997",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-IT-002",
+        "subject": "it_support",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-IT-003": {
+      "digest": "313fa404907df7ae4960ec30f421227e55d0699884bba84feb9c7ff56d07e2ff",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-IT-003",
+        "subject": "it_support",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-IT-004": {
+      "digest": "0a0edaee726b497742bac05dab84f0f11ce856a8ee7fc3ce5848fb78dddc92c6",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-IT-004",
+        "subject": "it_support",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-IT-005": {
+      "digest": "e84a3f6ee67660a038f7baa537bebe0f285201d2a0393a8fa0a84c36632f9812",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-IT-005",
+        "subject": "it_support",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-IT-006": {
+      "digest": "08a49c67e5877816b3f86bbdbbe5d230680f942e271e5b3233c4e25fa9a81179",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-IT-006",
+        "subject": "it_support",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-IT-007": {
+      "digest": "739352c4f4bc5f9da75d331bc0f9cd0688488ea5c816d5c9f7c236f32aadc1d6",
+      "metadata": {
+        "access_scope": "employee_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-IT-007",
+        "subject": "it_support",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-IT-008": {
+      "digest": "38fdbc4a5fc822e80ff9cb2dbebd5eed534d4c9be933926a4fb578d07c899302",
+      "metadata": {
+        "access_scope": "employee_personal_handoff",
+        "approval_status": "owner_approved",
+        "classification": "non_general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-IT-008",
+        "subject": "it_support",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-IT-009": {
+      "digest": "56077c71c0f2ebe331009786e64092fa9ff03eb67c8e9a23f6a3fe807c18c979",
+      "metadata": {
+        "access_scope": "employee_personal_handoff",
+        "approval_status": "owner_approved",
+        "classification": "non_general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-IT-009",
+        "subject": "it_support",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-IT-010": {
+      "digest": "d12cf5276f644e7e16488da23b44949a394b99e307f22e2ea9e85effd2844956",
+      "metadata": {
+        "access_scope": "home_department_internal",
+        "approval_status": "owner_approved",
+        "classification": "non_general",
+        "current_status": "current",
+        "eligible_audience": [
+          "employee"
+        ],
+        "source_id": "SU-IT-010",
+        "subject": "it_support",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-SD-001": {
+      "digest": "ff22ca6e93ca209dd748eb7c6b7d509db11692344293c0dfe2b5efd6b26203cc",
+      "metadata": {
+        "access_scope": "customer_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-SD-001",
+        "subject": "shipping_delivery",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-SD-002": {
+      "digest": "c21768548e9e36ae2ef0e7f1d14a9eb43af899bcd258dba69d45d6451b3ad143",
+      "metadata": {
+        "access_scope": "customer_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-SD-002",
+        "subject": "shipping_delivery",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-SD-003": {
+      "digest": "7b81a52ade7619a54c85b65052ae1d81668fc52efe1d5300ba7fbabf5bd1234a",
+      "metadata": {
+        "access_scope": "customer_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-SD-003",
+        "subject": "shipping_delivery",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-SD-004": {
+      "digest": "8f17d1c001c8e3f51661e8b3bd0516d9fce5f07fce0c448f2126e8f1bba0e0fd",
+      "metadata": {
+        "access_scope": "customer_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-SD-004",
+        "subject": "shipping_delivery",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-SD-005": {
+      "digest": "fc1a3897cafde5831b5a07bf3f8198d7db8c6f62a2a6595220c9ce5a4dcc364f",
+      "metadata": {
+        "access_scope": "customer_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-SD-005",
+        "subject": "shipping_delivery",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-SD-006": {
+      "digest": "3be9bf8b2ba039116f72db09f86c78c388cc7be4827ad5a7f38c30d12f19eab7",
+      "metadata": {
+        "access_scope": "customer_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-SD-006",
+        "subject": "shipping_delivery",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-SD-007": {
+      "digest": "665e849855c2e73d0d3d3d4f2199ffc74014ade47e298072dcf2fc7761813d66",
+      "metadata": {
+        "access_scope": "customer_general",
+        "approval_status": "owner_approved",
+        "classification": "general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-SD-007",
+        "subject": "shipping_delivery",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-SD-008": {
+      "digest": "76c73f462c45823a399e9497033e6a47e47efffbf5b50d04fc6313f3f0a91a99",
+      "metadata": {
+        "access_scope": "customer_personal_handoff",
+        "approval_status": "owner_approved",
+        "classification": "non_general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-SD-008",
+        "subject": "shipping_delivery",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-SD-009": {
+      "digest": "27e609aa7d68c6cb93d0d40c599638a7ffecef463cd29bfcd6b22366af2d169d",
+      "metadata": {
+        "access_scope": "customer_personal_handoff",
+        "approval_status": "owner_approved",
+        "classification": "non_general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-SD-009",
+        "subject": "shipping_delivery",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    },
+    "SU-SD-010": {
+      "digest": "0dd5ded0b2c6fb2ed7cee92b29a6ab8b90094790c35365214e809934fa057f89",
+      "metadata": {
+        "access_scope": "customer_personal_handoff",
+        "approval_status": "owner_approved",
+        "classification": "non_general",
+        "current_status": "current",
+        "eligible_audience": [
+          "customer"
+        ],
+        "source_id": "SU-SD-010",
+        "subject": "shipping_delivery",
+        "synthetic": true,
+        "version": "v1"
+      },
+      "version": "v1"
+    }
+  },
+  "recipe_version": 1,
+  "source_sha256": "a70330bc6dd2e5fd5abd16e45d810aaebb5a09b8e5ccb3dc65a5bb9325f2a590"
+}

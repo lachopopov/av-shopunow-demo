@@ -1,0 +1,7 @@
+# Allowlist: upload only what the hosted backend needs. Everything else stays local.
+*
+!pyproject.toml
+!uv.lock
+!src/
+!src/**
+src/**/__pycache__/

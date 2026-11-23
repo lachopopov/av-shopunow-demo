@@ -1,0 +1,927 @@
+{
+  "schema_version": "v1",
+  "dataset_status": "owner_approved",
+  "synthetic": true,
+  "records": [
+    {
+      "source_id": "SU-HR-001",
+      "version": "v1",
+      "source_question": "What is the annual leave allowance in this demo?",
+      "answer_facts": [
+        "The illustrative employee annual leave allowance is 20 days per demo year. This is a synthetic demo rule, not a statement of real employer policy."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "hr",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-HR-002",
+      "version": "v1",
+      "source_question": "What details belong in a leave request in this demo?",
+      "answer_facts": [
+        "The synthetic demo leave-request process asks an employee to specify the first and last dates and whether the days are full or partial. The knowledge record cannot submit or approve a request."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "hr",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-HR-003",
+      "version": "v1",
+      "source_question": "Do company closure days reduce the demo annual leave allowance?",
+      "answer_facts": [
+        "In this synthetic demo policy, company closure days are tracked separately and do not reduce the illustrative 20-day annual leave allowance. No individual balance is inferred."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "hr",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-HR-004",
+      "version": "v1",
+      "source_question": "How should an employee check a planned leave period?",
+      "answer_facts": [
+        "Under the synthetic demo leave process, an employee counts requested working days within the date range and checks any separately identified closure days. The 20-day annual allowance alone does not establish a personal remaining balance or approval."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "hr",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-HR-005",
+      "version": "v1",
+      "source_question": "What does the synthetic demo new-starter orientation cover?",
+      "answer_facts": [
+        "The synthetic demo orientation checklist covers the employee support map, basic security reminders, and how to ask HR about individual onboarding matters. The FAQ does not enroll or confirm completion for a person."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "hr",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-HR-006",
+      "version": "v1",
+      "source_question": "What information belongs in a training request?",
+      "answer_facts": [
+        "The synthetic demo training-request process calls for the course topic, its work purpose, and a preferred period. A request is subject to individual review; the FAQ cannot submit or approve it."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "hr",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-HR-007",
+      "version": "v1",
+      "source_question": "How should employees prepare for a feedback meeting?",
+      "answer_facts": [
+        "The synthetic demo feedback-meeting checklist asks employees to bring examples of completed work, obstacles, and questions about next steps. It does not record an individual performance outcome."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "hr",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-HR-008",
+      "version": "v1",
+      "source_question": "What is my remaining leave balance?",
+      "answer_facts": [
+        "An individual remaining leave balance is not provided by the general 20-day rule; an employee can be offered a simulated HR handoff for the personal record."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "hr",
+      "classification": "non_general",
+      "access_scope": "employee_personal_handoff",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-HR-009",
+      "version": "v1",
+      "source_question": "Has my leave request been approved?",
+      "answer_facts": [
+        "An individual leave-request status requires a simulated HR handoff; the demo knowledge corpus has no live approval record."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "hr",
+      "classification": "non_general",
+      "access_scope": "employee_personal_handoff",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-HR-010",
+      "version": "v1",
+      "source_question": "What is the HR team-building budget?",
+      "answer_facts": [
+        "The synthetic demo HR-home internal team-building allocation is 300 demo credits per team per quarter. This restricted value is never eligible for an automated direct answer, including to an HR profile."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "hr",
+      "classification": "non_general",
+      "access_scope": "home_department_internal",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-IT-001",
+      "version": "v1",
+      "source_question": "What information should an employee give IT for an ordinary support question?",
+      "answer_facts": [
+        "The synthetic demo IT support process asks for the affected device or application, a short symptom description, and when it started. Passwords and MFA codes should be omitted; the FAQ does not create a live ticket."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "it_support",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-IT-002",
+      "version": "v1",
+      "source_question": "What should an employee do with a suspected phishing message?",
+      "answer_facts": [
+        "The synthetic demo IT guidance is to avoid opening unexpected links or attachments and describe the message to IT Support through a simulated handoff. The assistant cannot investigate or remove the message."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "it_support",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-IT-003",
+      "version": "v1",
+      "source_question": "What information belongs in an approved-software request?",
+      "answer_facts": [
+        "The synthetic demo software-request process asks for the application name and work purpose. The FAQ cannot install software, grant access, or determine approval for an individual."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "it_support",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-IT-004",
+      "version": "v1",
+      "source_question": "What are the safe first checks for a demo Wi-Fi issue?",
+      "answer_facts": [
+        "The synthetic demo IT guidance is to confirm that Wi-Fi is enabled and record the device type and visible error without sharing a password. Network names and credentials are deliberately unspecified; an unresolved issue needs IT follow-up."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "it_support",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-IT-005",
+      "version": "v1",
+      "source_question": "What details help describe a device fault?",
+      "answer_facts": [
+        "The synthetic demo device-support process asks for the demo asset label, the symptom, and when the problem started. Do not include passwords or private files; the FAQ does not diagnose or repair a device."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "it_support",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-IT-006",
+      "version": "v1",
+      "source_question": "What is the demo rule for MFA support?",
+      "answer_facts": [
+        "The synthetic demo IT rule is that MFA codes are never requested in chat or shared with support. An enrollment or recovery problem needs individual IT follow-up; the FAQ cannot enroll an account."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "it_support",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-IT-007",
+      "version": "v1",
+      "source_question": "When does a demo IT request have a reference?",
+      "answer_facts": [
+        "A reference exists only if the application verifies that a simulated handoff record was saved and issues a receipt. This FAQ cannot create, find, or verify an individual reference."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "it_support",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-IT-008",
+      "version": "v1",
+      "source_question": "Can you unlock my account now?",
+      "answer_facts": [
+        "An individual lockout requires a simulated IT Support handoff; the FAQ cannot unlock an account or assert that recovery occurred."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "it_support",
+      "classification": "non_general",
+      "access_scope": "employee_personal_handoff",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-IT-009",
+      "version": "v1",
+      "source_question": "Has my software access request been granted?",
+      "answer_facts": [
+        "An individual access-grant status requires a simulated IT Support handoff; a submitted request does not prove access."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "it_support",
+      "classification": "non_general",
+      "access_scope": "employee_personal_handoff",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-IT-010",
+      "version": "v1",
+      "source_question": "What is the IT lockout triage tag?",
+      "answer_facts": [
+        "The synthetic demo IT-home internal lockout triage tag is Cobalt-4. It is a fictional classification label, not a recovery secret, and is never eligible for an automated direct answer."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "it_support",
+      "classification": "non_general",
+      "access_scope": "home_department_internal",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-FA-001",
+      "version": "v1",
+      "source_question": "What details belong in a demo desk-booking request?",
+      "answer_facts": [
+        "The synthetic demo desk-booking process asks for a date, time period, and accessibility need if relevant. The FAQ cannot reserve or guarantee a desk; individual availability needs Facilities follow-up."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "facilities_admin",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-FA-002",
+      "version": "v1",
+      "source_question": "What details belong in a visitor pre-registration request?",
+      "answer_facts": [
+        "The synthetic demo visitor process asks for a host, visit date, and visitor count, using synthetic details only in this demo. The FAQ does not register a real visitor or issue a pass."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "facilities_admin",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-FA-003",
+      "version": "v1",
+      "source_question": "What should an employee check before using meeting-room equipment?",
+      "answer_facts": [
+        "The synthetic demo room-equipment checklist is to confirm the display is powered, select the intended input, and describe any fault to Facilities. The FAQ cannot reserve a room or fix its equipment."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "facilities_admin",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-FA-004",
+      "version": "v1",
+      "source_question": "What details help report lost property?",
+      "answer_facts": [
+        "The synthetic demo lost-property report includes an item description, approximate location, and date. The FAQ cannot register a real report or confirm recovery; an individual case needs Facilities follow-up."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "facilities_admin",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-FA-005",
+      "version": "v1",
+      "source_question": "What information is needed for a mail-pickup question?",
+      "answer_facts": [
+        "The synthetic demo mail-pickup process asks for a synthetic parcel reference and intended recipient when seeking individual Facilities follow-up. The FAQ cannot verify arrival, identity, or release a parcel."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "facilities_admin",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-FA-006",
+      "version": "v1",
+      "source_question": "How is a workplace accessibility need handled in this demo?",
+      "answer_facts": [
+        "The synthetic demo process is to describe the needed adjustment at a high level to Facilities & Admin through a simulated handoff. The FAQ cannot assess, approve, or implement an individual adjustment."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "facilities_admin",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-FA-007",
+      "version": "v1",
+      "source_question": "How should an employee ask about a demo office location?",
+      "answer_facts": [
+        "The synthetic demo location guidance distinguishes a general room or zone question from an individual desk assignment. A personal assignment needs Facilities follow-up; the FAQ has no live floor map or occupancy data."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "facilities_admin",
+      "classification": "general",
+      "access_scope": "employee_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-FA-008",
+      "version": "v1",
+      "source_question": "Has my badge replacement been prepared?",
+      "answer_facts": [
+        "An individual badge-replacement status requires a simulated Facilities & Admin handoff; the FAQ has no live badge record."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "facilities_admin",
+      "classification": "non_general",
+      "access_scope": "employee_personal_handoff",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-FA-009",
+      "version": "v1",
+      "source_question": "Which desk was assigned to me?",
+      "answer_facts": [
+        "An individual desk assignment requires a simulated Facilities & Admin handoff; general desk-booking rules cannot establish a personal assignment."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "facilities_admin",
+      "classification": "non_general",
+      "access_scope": "employee_personal_handoff",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-FA-010",
+      "version": "v1",
+      "source_question": "How many blue folders are allocated to Facilities?",
+      "answer_facts": [
+        "The synthetic demo Facilities-home internal allocation is 12 blue folders per month. This restricted planning value is never eligible for an automated direct answer."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "facilities_admin",
+      "classification": "non_general",
+      "access_scope": "home_department_internal",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-BP-001",
+      "version": "v1",
+      "source_question": "What fields appear on a sample invoice in this synthetic demo policy?",
+      "answer_facts": [
+        "In the synthetic demo billing policy, a sample invoice lists an invoice reference, issue date, item subtotal, delivery fee, demo tax, discount, and total due. Total due equals subtotal plus delivery fee plus demo tax minus discount. This glossary does not retrieve an account invoice."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "billing_payments",
+      "classification": "general",
+      "access_scope": "customer_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-BP-002",
+      "version": "v1",
+      "source_question": "Which payment method labels does the synthetic demo policy recognize?",
+      "answer_facts": [
+        "In the synthetic demo billing policy, the illustrative payment method labels are demo card and demo credit. The labels describe sample records only; this assistant cannot collect card details, update a method, or take payment."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "billing_payments",
+      "classification": "general",
+      "access_scope": "customer_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-BP-003",
+      "version": "v1",
+      "source_question": "Is an invoice the same as a payment receipt?",
+      "answer_facts": [
+        "In the synthetic demo billing policy, an invoice states an amount due, while a payment receipt would confirm a separately verified recorded payment and its amount. An invoice alone does not prove payment; this demo has no payment-record integration or actual receipt verification."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "billing_payments",
+      "classification": "general",
+      "access_scope": "customer_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-BP-004",
+      "version": "v1",
+      "source_question": "What do the sample invoice charge lines mean?",
+      "answer_facts": [
+        "In the synthetic demo billing glossary, item subtotal is merchandise before additions or reductions; delivery fee is a separate shipping charge; demo tax is an illustrative tax line; and discount reduces total due. The glossary cannot explain an individual account charge."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "billing_payments",
+      "classification": "general",
+      "access_scope": "customer_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-BP-005",
+      "version": "v1",
+      "source_question": "Does seeing two similar charge lines prove a duplicate payment?",
+      "answer_facts": [
+        "No. Under the synthetic demo billing process, matching amounts or dates are clues for case review, not proof of a duplicate payment. A customer can describe the two synthetic charge references and dates for simulated Billing follow-up; the FAQ cannot verify transactions or decide a refund."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "billing_payments",
+      "classification": "general",
+      "access_scope": "customer_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-BP-006",
+      "version": "v1",
+      "source_question": "Can I pay by entering my full card number here?",
+      "answer_facts": [
+        "No. The synthetic demo billing rule prohibits entering a full payment card number in chat. The illustrative demo card label is only sample data; this assistant cannot collect card details or complete a payment."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "billing_payments",
+      "classification": "general",
+      "access_scope": "customer_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-BP-007",
+      "version": "v1",
+      "source_question": "What happens when a customer requests billing follow-up?",
+      "answer_facts": [
+        "Under the synthetic demo support process, the application may offer a simulated Billing & Payments handoff for a specific invoice, charge, or refund question. Only validated synthetic contact and a verified saved record permit a demo receipt; the receipt is not a payment receipt, refund decision, real agent assignment, or delivered email."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "billing_payments",
+      "classification": "general",
+      "access_scope": "customer_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-BP-008",
+      "version": "v1",
+      "source_question": "Why was my account charged twice?",
+      "answer_facts": [
+        "An individual suspected duplicate charge needs a simulated Billing & Payments handoff; the FAQ cannot inspect account transactions or decide a refund."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "billing_payments",
+      "classification": "non_general",
+      "access_scope": "customer_personal_handoff",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-BP-009",
+      "version": "v1",
+      "source_question": "Can you correct my invoice?",
+      "answer_facts": [
+        "An individual invoice correction requires a simulated Billing & Payments handoff; the FAQ cannot modify an invoice."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "billing_payments",
+      "classification": "non_general",
+      "access_scope": "customer_personal_handoff",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-BP-010",
+      "version": "v1",
+      "source_question": "Am I eligible for a refund?",
+      "answer_facts": [
+        "Refund eligibility is undefined in this synthetic demo corpus. An individual refund request can receive a simulated Billing & Payments handoff, without a promised decision, amount, deadline, or processing."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "billing_payments",
+      "classification": "non_general",
+      "access_scope": "customer_personal_handoff",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-SD-001",
+      "version": "v1",
+      "source_question": "What do the sample delivery-stage labels mean?",
+      "answer_facts": [
+        "In the synthetic demo shipping policy, order received means a sample order was recorded; preparing means it is being readied; handed to carrier means a carrier transfer was recorded; delivered means a delivery event was recorded. These are illustrative stage meanings, not live status for any order or parcel."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "shipping_delivery",
+      "classification": "general",
+      "access_scope": "customer_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-SD-002",
+      "version": "v1",
+      "source_question": "When may an address-change request be considered in the synthetic demo policy?",
+      "answer_facts": [
+        "In the synthetic demo shipping policy, an address-change request is considered before the handed-to-carrier stage. After that stage, the request requires individual review and rerouting is not guaranteed. The FAQ cannot change an order or inspect its actual stage."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "shipping_delivery",
+      "classification": "general",
+      "access_scope": "customer_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-SD-003",
+      "version": "v1",
+      "source_question": "What are the illustrative standard and express delivery windows?",
+      "answer_facts": [
+        "In the synthetic demo shipping policy, standard is an illustrative 3–5 demo business days and express is 1–2 demo business days after carrier handoff. These are policy examples for comparison, not a promised arrival date or confirmation that an option is available for a particular order."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "shipping_delivery",
+      "classification": "general",
+      "access_scope": "customer_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-SD-004",
+      "version": "v1",
+      "source_question": "When does the synthetic demo policy call a parcel late?",
+      "answer_facts": [
+        "In the synthetic demo shipping policy, a parcel may be reported as late once the upper end of its selected illustrative delivery window has passed after carrier handoff. A late report does not prove loss or establish a new delivery date; an individual case needs simulated Shipping follow-up."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "shipping_delivery",
+      "classification": "general",
+      "access_scope": "customer_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-SD-005",
+      "version": "v1",
+      "source_question": "What does a ready-for-pickup notice mean in the synthetic demo policy?",
+      "answer_facts": [
+        "In the synthetic demo shipping glossary, ready for pickup is distinct from in transit and means a sample carrier notice identifies a pickup location and collection window. This FAQ cannot inspect a real notice or confirm that a particular parcel is ready."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "shipping_delivery",
+      "classification": "general",
+      "access_scope": "customer_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-SD-006",
+      "version": "v1",
+      "source_question": "What should a customer retain when reporting package damage?",
+      "answer_facts": [
+        "In the synthetic demo shipping process, a customer describes the visible damage and retains the outer packaging and synthetic order reference for case review. This guidance does not submit a claim, determine responsibility, or promise a refund."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "shipping_delivery",
+      "classification": "general",
+      "access_scope": "customer_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-SD-007",
+      "version": "v1",
+      "source_question": "How should a demo return parcel be prepared?",
+      "answer_facts": [
+        "In the synthetic demo return-preparation rule, the item is secured, old shipping labels are removed, and a synthetic order reference is kept with the parcel. Preparation alone does not authorize the return, establish carrier acceptance, or determine refund eligibility."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "shipping_delivery",
+      "classification": "general",
+      "access_scope": "customer_general",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-SD-008",
+      "version": "v1",
+      "source_question": "Can you change the address on my order now?",
+      "answer_facts": [
+        "An order-specific address change needs a simulated Shipping & Delivery handoff; the FAQ cannot change an order or promise a reroute."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "shipping_delivery",
+      "classification": "non_general",
+      "access_scope": "customer_personal_handoff",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-SD-009",
+      "version": "v1",
+      "source_question": "Where is my missing parcel?",
+      "answer_facts": [
+        "A missing-parcel location needs a simulated Shipping & Delivery handoff; the FAQ cannot inspect live tracking or assert a location."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "shipping_delivery",
+      "classification": "non_general",
+      "access_scope": "customer_personal_handoff",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-SD-010",
+      "version": "v1",
+      "source_question": "Has my damage claim been accepted?",
+      "answer_facts": [
+        "An individual damage-claim status needs a simulated Shipping & Delivery handoff; the FAQ cannot inspect or decide a claim."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "shipping_delivery",
+      "classification": "non_general",
+      "access_scope": "customer_personal_handoff",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-CW-001",
+      "version": "v1",
+      "source_question": "Which support departments serve employees in this demo?",
+      "answer_facts": [
+        "Employee profiles can ask HR, IT Support, and Facilities & Admin for their respective subjects. CentralSupport explains the support map and delivers approved company-wide guidance."
+      ],
+      "eligible_audience": [
+        "employee"
+      ],
+      "subject": "company_wide",
+      "classification": "general",
+      "access_scope": "company_wide",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-CW-002",
+      "version": "v1",
+      "source_question": "Which support departments serve customers in this demo?",
+      "answer_facts": [
+        "Customer profiles can ask Billing & Payments and Shipping & Delivery for their respective subjects. CentralSupport explains the support map and delivers approved company-wide guidance."
+      ],
+      "eligible_audience": [
+        "customer"
+      ],
+      "subject": "company_wide",
+      "classification": "general",
+      "access_scope": "company_wide",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-CW-003",
+      "version": "v1",
+      "source_question": "What does a simulated handoff mean in this demo?",
+      "answer_facts": [
+        "A simulated handoff is an offer to submit synthetic contact details for a demo support record. A receipt is shown only after the record is verified as saved; no real staff assignment or email delivery is implied."
+      ],
+      "eligible_audience": [
+        "employee",
+        "customer"
+      ],
+      "subject": "company_wide",
+      "classification": "general",
+      "access_scope": "company_wide",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    },
+    {
+      "source_id": "SU-CW-004",
+      "version": "v1",
+      "source_question": "What information should I avoid entering in this support demo?",
+      "answer_facts": [
+        "Employees and customers should avoid entering real personal data, passwords, MFA codes, complete payment card numbers, or other secrets into the synthetic demo."
+      ],
+      "eligible_audience": [
+        "employee",
+        "customer"
+      ],
+      "subject": "company_wide",
+      "classification": "general",
+      "access_scope": "company_wide",
+      "approval_status": "owner_approved",
+      "current_status": "current",
+      "synthetic": true
+    }
+  ]
+}

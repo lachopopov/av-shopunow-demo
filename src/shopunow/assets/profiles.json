@@ -1,0 +1,79 @@
+{
+  "schema_version": "v1",
+  "dataset_status": "owner_approved",
+  "synthetic": true,
+  "profiles": [
+    {
+      "user_id": "syn-emp-hr-01",
+      "role": "employee",
+      "home_department": "hr",
+      "synthetic": true,
+      "approval_status": "owner_approved",
+      "current_status": "current"
+    },
+    {
+      "user_id": "syn-emp-hr-02",
+      "role": "employee",
+      "home_department": "hr",
+      "synthetic": true,
+      "approval_status": "owner_approved",
+      "current_status": "current"
+    },
+    {
+      "user_id": "syn-emp-it-01",
+      "role": "employee",
+      "home_department": "it_support",
+      "synthetic": true,
+      "approval_status": "owner_approved",
+      "current_status": "current"
+    },
+    {
+      "user_id": "syn-emp-it-02",
+      "role": "employee",
+      "home_department": "it_support",
+      "synthetic": true,
+      "approval_status": "owner_approved",
+      "current_status": "current"
+    },
+    {
+      "user_id": "syn-emp-fac-01",
+      "role": "employee",
+      "home_department": "facilities_admin",
+      "synthetic": true,
+      "approval_status": "owner_approved",
+      "current_status": "current"
+    },
+    {
+      "user_id": "syn-emp-fac-02",
+      "role": "employee",
+      "home_department": "facilities_admin",
+      "synthetic": true,
+      "approval_status": "owner_approved",
+      "current_status": "current"
+    },
+    {
+      "user_id": "syn-cust-01",
+      "role": "customer",
+      "home_department": null,
+      "synthetic": true,
+      "approval_status": "owner_approved",
+      "current_status": "current"
+    },
+    {
+      "user_id": "syn-cust-02",
+      "role": "customer",
+      "home_department": null,
+      "synthetic": true,
+      "approval_status": "owner_approved",
+      "current_status": "current"
+    },
+    {
+      "user_id": "syn-cust-03",
+      "role": "customer",
+      "home_department": null,
+      "synthetic": true,
+      "approval_status": "owner_approved",
+      "current_status": "current"
+    }
+  ]
+}

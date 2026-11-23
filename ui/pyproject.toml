@@ -1,0 +1,12 @@
+[project]
+name = "shopunow-ui"
+version = "0.1.0"
+description = "ShopUNow Streamlit UI: talks to the FastAPI backend only; the backend token stays server-side"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "httpx==0.28.1",
+    "streamlit==1.67.0",
+]
+
+[tool.uv]
+package = false  # A Streamlit script, not an installable package; no backend dependencies.
