@@ -11,6 +11,8 @@ import api_client
 PROFILES = ('syn-cust-01', 'syn-cust-02', 'syn-cust-03', 'syn-emp-hr-01', 'syn-emp-hr-02',
             'syn-emp-it-01', 'syn-emp-it-02', 'syn-emp-fac-01', 'syn-emp-fac-02')
 NOTICE_TEXT = 'Still working on your question. Answers can take up to about 90 seconds.'
+STEP_NAMES = ('Checking your question', 'Finding the right department', 'Looking up information',
+              'Writing the answer', 'Checking the answer')  # Backend progress steps 1-5 (owner 2026-11-23).
 DEMO_NOTICE = 'Demo only: profiles are shared by all visitors. Use fictitious contact details only.'  # D15, owner.
 
 st.set_page_config(page_title='ShopUNow support', page_icon=':material/support_agent:')
@@ -56,6 +58,15 @@ client = st.session_state.client
 @st.cache_resource
 def request_pool():
     return ThreadPoolExecutor(max_workers=4)  # Lets the page show the 3-second notice while waiting.
+
+
+def show_progress(target, sel):
+    # Real backend step for the asking conversation; the generic notice when the step is unknown.
+    step = client.progress(sel[0], sel[1])
+    if step is None:
+        target.info(NOTICE_TEXT)
+    else:
+        target.progress(step / len(STEP_NAMES), text=f'Step {step} of {len(STEP_NAMES)} · {STEP_NAMES[step - 1]}…')
 
 
 def reset_view(conversation_id=None):
@@ -212,15 +223,15 @@ for row in api_client.visible(st.session_state.transcript, current):
 
 pending = st.session_state.pending
 if pending is not None:
-    if pending['sel'] == current:
-        st.info(NOTICE_TEXT)
-    else:  # Asked under another selection: its result stays bound there and is never shown here.
+    if pending['sel'] != current:  # Asked under another selection: its result stays bound there.
         st.caption('An earlier question is still finishing; you can ask again shortly.')
 
     @st.fragment(run_every=2)
     def check_pending():
         if st.session_state.pending is None or st.session_state.pending['future'].done():
             st.rerun()  # Whole page: collect the result under its own selection.
+        if st.session_state.pending['sel'] == current:
+            show_progress(st, current)  # Redrawn every 2 s with the latest step.
     check_pending()
 
 question = st.chat_input('Ask a question', key='question', submit_mode='disable', max_chars=2000,
@@ -236,7 +247,7 @@ if question:
                'future': request_pool().submit(timed_ask, timer, client.ask, captured[0], captured[1],
                                                question, None)}  # Evaluated path: no style.
     st.session_state.pending = pending  # Survives an interrupted run.
-    api_client.wait_with_notice(pending['future'], lambda: waiting.info(NOTICE_TEXT))
+    api_client.wait_with_progress(pending['future'], lambda: show_progress(waiting, captured))
     waiting.empty()
     if st.session_state.pending is pending:
         collect(pending)
@@ -244,4 +255,4 @@ if question:
 
 
 # Flow: server config -> password gate -> profile (stored binding) -> new/reopen conversation
-# -> explicit question with 3 s notice -> bound result -> optional handoff form -> simulated receipt.
+# -> explicit question with a real progress bar after 3 s -> bound result -> optional handoff form -> receipt.

@@ -602,6 +602,44 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((wiring.SECURITY_TRIGGER, wiring.TOPIC_TRIGGER, wiring.SEMANTIC_CONFIDENCE_TRIGGER),
                          (.7, .5, .7))
 
+    async def test_the_served_routing_tie_breaker_uses_sol_low_while_the_writer_stays_on_sol_medium(self):
+        # Break caught (owner decision 2026-11-23, after the Luna and Sol-low replays): the routing call does not
+        # use Sol at low effort, or the writer is moved off the evaluated Sol medium configuration with it.
+        from shopunow import wiring
+        fixture = self.fixture
+        fixture.answers['topic_shipping_delivery']['noul'] = .6  # Present but uncertain: routing is adjudicated.
+        admitted = wiring.answering(openai_client=fixture.reviewer, jev_client=fixture.jev,
+                                    catalog=fixture.catalog)(storage=fixture.storage, tracking=fixture.tracking)
+        fixture.continue_admitted = admitted
+        response = await self.post()
+        self.assertEqual(response.json()['outcome']['kind'], 'answer')
+        sent = {}
+        for schema, body in fixture.calls:
+            if isinstance(body, dict) and 'model' in body:
+                sent.setdefault(schema, (body['model'], (body.get('reasoning') or {}).get('effort')))
+        self.assertEqual(sent['RoutingResolution'], ('gpt-6.1-sol', 'low'))
+        self.assertEqual(sent['ProducerReply'], ('gpt-6.1-sol', 'medium'))
+
+    async def test_the_served_wiring_reports_each_answer_step_in_order_and_clears_it_at_the_end(self):
+        # Break caught (owner request 2026-11-23): the progress bar shows no step, a wrong order, or a
+        # finished question's step stays visible.
+        from shopunow import wiring
+        fixture = self.fixture
+        seen = []
+
+        class Recorder:
+            def report(self, user_id, conversation_id, step):
+                seen.append(step)
+
+            def clear(self, user_id, conversation_id):
+                seen.append('cleared')
+        admitted = wiring.answering(openai_client=fixture.reviewer, jev_client=fixture.jev, catalog=fixture.catalog,
+                                    progress=Recorder())(storage=fixture.storage, tracking=fixture.tracking)
+        fixture.continue_admitted = admitted
+        response = await self.post()
+        self.assertEqual(response.json()['outcome']['kind'], 'answer')
+        self.assertEqual(seen, [1, 2, 3, 4, 5, 'cleared'])
+
     async def test_an_approved_draft_marked_unresolved_is_delivered_once_without_an_offer(self):
         # Break caught: code overrides two approvals because of the (possibly wrong) unresolved label,
         # attaches an offer to a partial answer (CD-093), or adds the support sentence after review (CD-098).

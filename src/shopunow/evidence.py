@@ -111,7 +111,8 @@ class EvidenceService:
     """
     def __init__(self, *, storage, catalog, models, attempt, tracking, request, profile,
                  transcript, request_id, created_at, budget, uuid_factory=uuid4,topic_trigger=None,
-                 semantic_confidence_trigger=None,history_identity_resolver=None,answer_models=None):
+                 semantic_confidence_trigger=None,history_identity_resolver=None,answer_models=None,
+                 routing_models=None,on_progress=None):
         if (tracking is not attempt._hold_tracking or request.user_id != profile.user_id
                 or str(UUID(request.conversation_id)) != attempt._hold_id):
             raise ValueError('Evidence must retain admitted identity and tracking.')
@@ -139,6 +140,8 @@ class EvidenceService:
         self._withheld_history_ids=set()  # A denial lasts for the request; a later search cannot reverse it.
         self._malicious_history_ids=set()  # Only successful per-ID review can establish this exclusion.
         self.answer_models=answer_models  # Explicit opt-in; no normal runtime model is enabled.
+        self.routing_models=routing_models  # Routing tie-breaker model (owner 2026-11-23); None: answer models.
+        self.on_progress=on_progress  # UI progress step callback (owner 2026-11-23); None: not reported.
         self._routing_attempted=self._candidate_attempted=False
         self._semantic_sources={}
         self._descriptor_results={}
@@ -163,7 +166,7 @@ class EvidenceService:
                 'conversation_id':row.conversation_id} for row in history],
             'judgments':{key:value.model_dump() for key,value in self._judgments.items()},
             'unresolved_judgments':list(self._unresolved_judgments)}
-        raw=self._model(self.answer_models.resolve_routing,payload)
+        raw=self._model((self.routing_models or self.answer_models).resolve_routing,payload)
         resolved=RoutingResolution.model_validate(raw.model_dump() if hasattr(raw,'model_dump') else raw)
         source_ids=[row.source_id for row in resolved.source_matches]
         if (resolved.question!=self.request.question or len(source_ids)!=len(set(source_ids))
@@ -473,6 +476,8 @@ class EvidenceService:
             dict.fromkeys((*decision.destinations,*stable)))
 
     def _knowledge(self, destinations):
+        if self.on_progress is not None:
+            self.on_progress(3)  # Progress step 3: looking up information.
         candidates = []
         if not destinations:
             return candidates

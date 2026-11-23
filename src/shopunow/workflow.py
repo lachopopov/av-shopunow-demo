@@ -228,7 +228,7 @@ def run_private_workflow(*,request,profile,transcript,attempt,tracking,storage,r
                          security_trigger=None,topic_trigger=None,semantic_confidence_trigger=None,
                          history_identity_resolver=None,fallback_reviewer_client=None,model_budget=None,
                          observe_evidence=None,observe_result=None,observe_response=None,utc_now=None,
-                         uuid_factory=None):
+                         uuid_factory=None,routing_models=None,on_progress=None):
     """Compose Slice4 inside the admitted worker; public return remains the incoming safe result.
 
     All clients/configuration are explicitly injected. Private observations are request-local;
@@ -261,17 +261,21 @@ def run_private_workflow(*,request,profile,transcript,attempt,tracking,storage,r
     def cleared(decision):
         nonlocal progressed
         progressed=True
+        if on_progress is not None:
+            on_progress(2)  # Progress step 2: finding the right department.
         now=utc_now or (lambda:datetime.now(timezone.utc))
         options={} if uuid_factory is None else {'uuid_factory':uuid_factory}
         service=EvidenceService(request=request,profile=profile,transcript=transcript,attempt=attempt,
             tracking=tracking,storage=storage,request_id=request_id,created_at=now().isoformat(),
-            catalog=catalog,models=evidence_models,answer_models=answer_models,budget=budget,
+            catalog=catalog,models=evidence_models,answer_models=answer_models,routing_models=routing_models,on_progress=on_progress,budget=budget,
             topic_trigger=topic_trigger,semantic_confidence_trigger=semantic_confidence_trigger,
             history_identity_resolver=history_identity_resolver,**options)
         evidence=service.prepare(decision)  # Exact pending verification precedes retrieval and generation.
         if observe_evidence is not None:
             observe_evidence(evidence)
         if evidence.kind in ('ready','clarification_needed','insufficient_evidence') and evidence.destinations:
+            if on_progress is not None:
+                on_progress(4)  # Progress step 4: writing the answer.
             run_production(evidence=evidence,service=service,models=answer_models,observe_result=emit)
         else:
             dispositions=tuple(dict.fromkeys((*evidence.dispositions,
@@ -465,6 +469,8 @@ def complete_reviewed(result, *, review_models, **options):
 
         def review(snapshot):
             # Both reviewers judge the same immutable snapshot; the pool waits for both before returning.
+            if options.get('on_progress') is not None:
+                options['on_progress'](5)  # Progress step 5: checking the answer.
             with ThreadPoolExecutor(2) as pool:
                 return list(pool.map(lambda reviewer: run_final_review(
                     snapshot, reviewer, role=profile.role, home_department=profile.home_department,

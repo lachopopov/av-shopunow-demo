@@ -9,6 +9,7 @@ NOTICE_SECONDS = 3.0  # LLD Slice 6: show a pending notice if a question takes l
 QUESTION_TIMEOUT = httpx.Timeout(connect=5.0, read=120.0, write=10.0, pool=5.0)
 HANDOFF_TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)  # 20 s + 10 s margin.
 OTHER_TIMEOUT = httpx.Timeout(connect=5.0, read=25.0, write=10.0, pool=5.0)  # 15 s + 10 s margin.
+PROGRESS_TIMEOUT = httpx.Timeout(3.0)  # A progress read is optional: never hold the page up for long.
 
 # Fixed UI wording per backend code. The backend message is never shown, so unknown text cannot leak.
 MESSAGES = {
@@ -100,6 +101,15 @@ class Client:
                           timeout=OTHER_TIMEOUT, write=False,
                           expect={'user_id': user_id, 'conversation_id': conversation_id})
 
+    def progress(self, user_id, conversation_id):
+        # Owner request 2026-11-23: the step a running question has reached (1-5), or None when unknown.
+        # Any failure only means "no step shown"; it never affects the question itself.
+        result = self._call('GET', '/progress', params={'user_id': user_id, 'conversation_id': conversation_id},
+                            timeout=PROGRESS_TIMEOUT, write=False,
+                            expect={'user_id': user_id, 'conversation_id': conversation_id})
+        step = result.body.get('step') if result.ok else None
+        return step if isinstance(step, int) and 1 <= step <= 5 else None
+
     def ask(self, user_id, conversation_id, question, response_style):
         payload = {'user_id': user_id, 'conversation_id': conversation_id, 'question': question}
         if response_style is not None:
@@ -132,6 +142,21 @@ def visible(items, selection):
 # Flow: one explicit request -> token from server config -> bounded wait -> bound success, a fixed
 # definite-error message, or an uncertain outcome (no auto retry): a question is checked by reopening,
 # a handoff by submitting the same details again, which returns the saved receipt (CD-100).
+
+
+def wait_with_progress(future, update, interval=1.0):
+    """Wait for one running request; after NOTICE_SECONDS call update() about every `interval` seconds."""
+    from concurrent.futures import TimeoutError as StillRunning
+    try:
+        return future.result(timeout=NOTICE_SECONDS)  # Fast results (offers, blocks) show no progress.
+    except StillRunning:
+        pass
+    while True:
+        update()  # Redraw the progress bar with the latest step.
+        try:
+            return future.result(timeout=interval)
+        except StillRunning:
+            continue
 
 
 def wait_with_notice(future, notify):

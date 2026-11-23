@@ -21,8 +21,18 @@ class StorageApplication:
     """Five storage routes with existing native worker and HTTP completion ownership."""
 
     def __init__(self, *, connect, api_token, collection_names, clock=monotonic,
-                 knowledge_collection_name=None, answering=None):
+                 knowledge_collection_name=None, answering=None, progress=None):
         self.worker = LocalSDKWorker(connect)
+        self.progress_host = None  # GET /progress only when a progress store is configured (owner 2026-11-23).
+        if progress is not None:
+            self.progress_host = api.create_app()  # Same safe error handling as every other route.
+            progress_validate = api.history_validator(api_token=api_token)  # Token + user/conversation query.
+
+            @self.progress_host.get('/progress')
+            async def progress_step(payload: Annotated[object, Depends(progress_validate)]):
+                # In-memory read only: no storage, no allowance; a step number, never content.
+                return {'user_id': payload.user_id, 'conversation_id': payload.conversation_id,
+                        'step': progress.get(payload.user_id, payload.conversation_id)}
         self.answering, self.question_host = answering, None  # /interactions only when configured.
         self.storage = None
         self.tracking = admission.OwnedRecordTracking()
@@ -157,6 +167,8 @@ class StorageApplication:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.application(scope, receive, send)
+        if scope["path"] == "/progress" and self.progress_host is not None:
+            return await self.progress_host(scope, receive, send)  # Plain read; no owned lifecycle needed.
         if scope["path"] == "/interactions" and self.answering is not None:
             if self.question_host is None:  # Not started yet: same safe capacity error as other routes.
                 response = api.question_error(Request(scope), "execution_capacity")
@@ -243,7 +255,7 @@ class StorageApplication:
 
 
 def create_storage_app(*, connect, api_token, collection_names, knowledge_collection_name=None,
-                       answering=None):
+                       answering=None, progress=None):
     if len(collection_names)!=3 or len(set(collection_names))!=3:
         raise ValueError('Three distinct operational collection names are required.')
     if not api_token:
@@ -253,7 +265,8 @@ def create_storage_app(*, connect, api_token, collection_names, knowledge_collec
             or knowledge_collection_name in collection_names):
         raise ValueError('A distinct explicitly prepared Knowledge collection is required.')
     return StorageApplication(connect=connect,api_token=api_token,collection_names=collection_names,
-                              knowledge_collection_name=knowledge_collection_name,answering=answering)
+                              knowledge_collection_name=knowledge_collection_name,answering=answering,
+                              progress=progress)
 
 
 # Flow: explicit initializer -> one lifespan client/loop -> existing five-slot operations

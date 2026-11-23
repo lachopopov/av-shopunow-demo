@@ -58,6 +58,8 @@ def build_app(settings):
     from openai import OpenAI  # Clients connect lazily on first call; no retries (MLD §11: no blind retry).
     from typesafe_sdk import RetryPolicy, TypeSafeClient
     from shopunow.wiring import answering
+    from shopunow.progress import Progress  # One in-memory step store shared by the workflow and GET /progress.
+    progress = Progress()
     openai_client = OpenAI(api_key=settings.openai_api_key.get_secret_value(),
                            base_url='https://api.openai.com/v1', max_retries=0)  # Fixed public endpoint.
     jev_client = TypeSafeClient(api_key=settings.typesafe_api_key.get_secret_value(),
@@ -66,7 +68,9 @@ def build_app(settings):
     application = create_storage_app(connect=connect, api_token=settings.api_token.get_secret_value(),
                                      collection_names=settings.collections,
                                      knowledge_collection_name=settings.knowledge_collection,
-                                     answering=answering(openai_client=openai_client, jev_client=jev_client))
+                                     answering=answering(openai_client=openai_client, jev_client=jev_client,
+                                                         progress=progress),
+                                     progress=progress)
     return CorrelatedServerApp(application)
 
 
