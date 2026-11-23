@@ -46,7 +46,7 @@ class ProductionClientTests(unittest.TestCase):
         self.assertIs(body['store'],False)
         self.assertEqual(json.loads(body['input']),{'request_id':'request-1','part':'shipping_delivery',
             'question':'Explain tracking','response_style':'brief','unresolved_parts':[],
-            'dependency':'unclear','missing_context':None,'other_parts':[],'own_notes':[],'part_outcomes':[],  # other_parts: R3; own_notes: R4
+            'dependency':'unclear','missing_context':None,'history_owner':False,'other_parts':[],'own_notes':[],'part_outcomes':[],  # other_parts: R3; own_notes: R4
             'evidence':[{'excerpt_id':'e1','source_kind':'knowledge','source_record_id':'SU-SD-001',
                          'source_version':'v1','text':'Tracking facts','destination':'shipping_delivery'}],
             'contributions':[]})

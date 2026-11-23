@@ -100,41 +100,40 @@ class ProductionWorkflowTests(unittest.TestCase):
         self.assertEqual(snapshots[0].contexts,())
         self.assertEqual(snapshots[0].frozen_contributors,())
 
-    def test_two_context_requests_share_one_search_and_resume_only_first_dispatch(self):
+    def test_at_most_one_history_search_per_question_and_only_by_the_owner(self):
+        # Owner 2026-11-23 (challenge T1): every producer asks; only central support (owner) is searched, once.
         from tests.test_evidence import relevance_answers
+        from tests.test_incoming import judgment_answers
+        from shopunow.incoming import validate_history_route,HISTORY_ROUTE_FIELDS
         self.fixture.identity_fixture(confidence=1.,label='clear')
         self.fixture.models.relevance=lambda question,candidates,**kwargs:relevance_answers(candidates)
+        def route(*args,**kwargs):
+            answers=judgment_answers()
+            answers['topic_billing_payments']['noul']=answers['topic_shipping_delivery']['noul']=1.
+            return validate_history_route({key:answers[key] for key in HISTORY_ROUTE_FIELDS})
+        self.fixture.models.history_route=route
         self.service.destinations=('billing_payments','shipping_delivery')
         bill=replace(self.evidence.cleared[0],excerpt_id='bill',destination='billing_payments')
         self.evidence=replace(self.evidence,destinations=self.service.destinations,
                               cleared=(bill,*self.evidence.cleared),dependency='independent')
-        first_started,later_finished=Event(),Event()
         counts={}
         def produce(payload,*,timeout):
             part=payload['part']
             counts[part]=counts.get(part,0)+1
-            if part=='billing_payments' and counts[part]==1:
-                first_started.set()
-                if not later_finished.wait(3):
-                    raise AssertionError('Second requester did not run')
-            reply=self.produce(payload,timeout=timeout)
-            if counts[part]==1 and part!='central_support':  # Only the two specialists request context.
-                reply.update(kind='context_needed',text=None,cited_ids=[],support_assertion=False,
-                             target='The earlier parcel correction')
-            if part=='shipping_delivery':
-                later_finished.set()
-            return reply
+            if counts[part]==1:  # Every producer asks once (central support starts with no evidence).
+                self.calls.append(payload)
+                return {'part':part,'kind':'context_needed','text':None,'cited_ids':[],'support_assertion':False,
+                        'target':'The earlier parcel correction','reason':None,'unresolved_parts':[],
+                        'saved_action_claim_ids':[]}
+            return self.produce(payload,timeout=timeout)
         self.models.produce=produce
         result=self.run_production()
-        self.assertTrue(first_started.is_set())
-        self.assertEqual(counts,{'billing_payments':2,'shipping_delivery':1,'central_support':1})  # Owner decision 2026-11-19: an unfinished other part sends the answer through synthesis.
-        self.assertEqual(self.service.searches,1)
-        self.assertEqual(result.draft.contributor_ids,('billing_payments','central_support'))  # Owner decision 2026-11-19: an unfinished other part sends the answer through synthesis.
-        self.assertIn(('shipping_delivery','insufficient_evidence'),
+        self.assertEqual(counts,{'billing_payments':1,'shipping_delivery':1,'central_support':2})
+        self.assertEqual(self.service.searches,1)  # One history search (it may read several pages).
+        self.assertIn(('billing_payments','insufficient_evidence'),
                       [(row.part,row.kind) for row in result.dispositions])
-        context=next(row for row in result.contexts if row.part=='billing_payments')
-        self.assertEqual([row.source_kind for row in context.evidence],['owned_history','owned_history'])
-        self.assertEqual(context.evidence[0].excerpt_id,self.calls[-1]['evidence'][0]['excerpt_id'])
+        central=next(row for row in result.contexts if row.part=='central_support')
+        self.assertIn('owned_history',[row.source_kind for row in central.evidence])
 
     def test_central_support_can_continue_after_specialist_cutoff_using_original_deadline(self):
         from tests.test_evidence import relevance_answers
@@ -233,10 +232,7 @@ class ProductionWorkflowTests(unittest.TestCase):
         self.assertIn('observe_result',__import__('inspect').signature(
             __import__('shopunow.production',fromlist=['run_production']).run_production).parameters,
             'The pre-drain observation must include retained correction inputs, not only draft text')
-        self.service.destinations=('billing_payments','shipping_delivery')
-        bill=replace(self.evidence.cleared[0],excerpt_id='bill',destination='billing_payments')
-        self.evidence=replace(self.evidence,destinations=self.service.destinations,
-                              cleared=(bill,*self.evidence.cleared),dependency='independent')
+        # One department: its specialist owns history (owner 2026-11-23); its search outlives the cutoff.
         started,release,observed,returned=Event(),Event(),Event(),Event()
         def produce(payload,*,timeout):
             reply=self.produce(payload,timeout=timeout)
@@ -246,7 +242,7 @@ class ProductionWorkflowTests(unittest.TestCase):
             return reply
         self.models.produce=produce
         def history(user_id,*,offset,timeout):
-            started.set()  # Deterministic arbitration requires the earlier billing receipt first.
+            started.set()
             if not release.wait(5):
                 raise AssertionError('Late supplementary read was not released')
             return {'ids':[],'documents':[],'metadatas':[]}
@@ -265,15 +261,9 @@ class ProductionWorkflowTests(unittest.TestCase):
         self.assertTrue(observed.wait(3))
         self.assertFalse(returned.is_set())
         snapshot=snapshots[0]
-        self.assertEqual(snapshot.draft.full_text,'Tracking facts')
-        self.assertEqual(snapshot.draft.contributor_ids,('billing_payments','central_support'))  # Owner decision 2026-11-19: an unfinished other part sends the answer through synthesis.
-        self.assertEqual([(row.part,row.kind) for row in snapshot.contributions],
-                         [('billing_payments','supported_answer'),('central_support','supported_answer')])
-        self.assertEqual(snapshot.contexts[0].evidence,(bill,))
+        self.assertIsNone(snapshot.draft)
         self.assertIn(('shipping_delivery','incomplete_at_cutoff'),
                       [(row.part,row.kind) for row in snapshot.dispositions])
-        # Owner decision 2026-11-19: the synthesis input is retained after the frozen specialist inputs.
-        self.assertEqual([row.part for row in snapshot.contexts],[*snapshot.frozen_contributors,'central_support'])
         release.set()
         worker.join(3)
         self.assertEqual(results,[snapshot])
@@ -467,49 +457,6 @@ class ProductionWorkflowTests(unittest.TestCase):
         self.assertEqual(len(result.contexts),3)
         self.assertEqual(result.contexts[-1].part,'central_support')
         self.assertEqual(result.contexts[-1].contributions,result.contributions[:-1])
-
-    def test_supplementary_crossing_cutoff_does_not_block_timely_independent_assembly(self):
-        # The later requester cannot start retrieval until the earlier billing outcome is received.
-        first=replace(self.evidence.cleared[0],excerpt_id='bill',destination='billing_payments')
-        second=replace(self.evidence.cleared[0],excerpt_id='ship')
-        self.service.destinations=('billing_payments','shipping_delivery')
-        self.evidence=replace(self.evidence,destinations=self.service.destinations,
-                              cleared=(first,second),dependency='independent')
-        retrieval_started,release,drafted,returned=Event(),Event(),Event(),Event()
-        def produce(payload,*,timeout):
-            reply=self.produce(payload,timeout=timeout)
-            if payload['part']=='shipping_delivery':
-                reply.update(kind='context_needed',text=None,cited_ids=[],support_assertion=False,
-                             target='The earlier parcel correction')
-            return reply
-        self.models.produce=produce
-        def history(user_id,*,offset,timeout):
-            self.fixture.clock[0]=160.0
-            retrieval_started.set()
-            if not release.wait(5):
-                raise AssertionError('Test did not release supplementary read')
-            return {'ids':[],'documents':[],'metadatas':[]}
-        self.service.storage.history_page=history
-        snapshots,results=[],[]
-        model_calls_before=list(self.fixture.models.calls)
-        def run():
-            try:
-                results.append(self.run_production(observe_draft=lambda value:(snapshots.append(value),drafted.set())))
-            finally:
-                returned.set()
-        worker=Thread(target=run)
-        worker.start()
-        self.addCleanup(lambda:(release.set(),worker.join(6)))
-        self.assertTrue(retrieval_started.wait(3))
-        self.assertTrue(drafted.wait(3))
-        self.assertFalse(returned.is_set())
-        self.assertEqual(snapshots[0].contributor_ids,('billing_payments','central_support'))  # Owner decision 2026-11-19: an unfinished other part sends the answer through synthesis.
-        self.assertEqual(snapshots[0].unresolved_parts,('shipping_delivery',))
-        release.set()
-        worker.join(3)
-        self.assertTrue(returned.is_set())
-        self.assertEqual(results[0].draft,snapshots[0])
-        self.assertEqual(self.fixture.models.calls,model_calls_before)  # No relevance/review after the read crossed60s.
 
     def setUp(self):
         from shopunow import production

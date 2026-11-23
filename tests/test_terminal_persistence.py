@@ -71,6 +71,18 @@ class ReviewedFixture(PrivateWorkflowFixture):
             raise
 
 
+def ask_history_once(fixture, hook=None):
+    # Owner 2026-11-23: history enters only when the history owner asks (context_needed) once.
+    asked = set()
+    def produce(payload, reply):
+        if payload['history_owner'] and payload['part'] not in asked and not payload.get('correction'):
+            asked.add(payload['part'])
+            return dict(reply, kind='context_needed', text=None, cited_ids=[], support_assertion=False,
+                        target='The earlier delivery case')
+        return hook(payload, reply) if hook else reply
+    fixture.producer_hook = produce
+
+
 class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.http = http_fixtures.QuestionHTTPTests(methodName='runTest')
@@ -289,7 +301,6 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_correction_is_discarded_when_its_recalled_conversation_becomes_unresolved(self):
         # Break caught: a correction keeps using owned history that was excluded meanwhile (sibling
         # parity with production's recalled-context check).
-        self.fixture.answers['history_needed']['noul'] = 1.
         recalled = self.fixture.history()
 
         def produce(payload, reply):
@@ -297,19 +308,19 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 self.fixture.tracking.exclude_conversation(recalled)  # Unresolved during the correction.
                 return dict(reply, text='Corrected with history')
             return reply
-        self.fixture.producer_hook = produce
+        ask_history_once(self.fixture, produce)
         self.fixture.verdicts['security'] = [
             {'verdict': 'revise', 'defect': 'Names a staff member.', 'responsible_producers': ['shipping_delivery']},
             {'verdict': 'approve', 'defect': None, 'responsible_producers': []}]
         response = await self.post()
         self.assertTrue(any(row['source_kind'] == 'owned_history'
-                            for row in self.fixture.producer_calls[0]['evidence']))
+                            for row in self.fixture.producer_calls[1]['evidence']))  # The owner's resumed call.
         self.assertEqual(response.json()['outcome']['kind'], 'handoff_offer')
         self.assertNotIn('Corrected with history', response.text + self.logs)
 
     async def test_an_approved_answer_is_not_saved_when_its_recalled_conversation_became_unresolved(self):
         # Break caught: the final save trusts history that was excluded while the reviewers ran.
-        self.fixture.answers['history_needed']['noul'] = 1.
+        ask_history_once(self.fixture)
         recalled = self.fixture.history()
         self.fixture.review_hook = lambda reviewer, payload: self.fixture.tracking.exclude_conversation(recalled)
         response = await self.post()
@@ -353,7 +364,7 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
         # Break caught: a clarification or a production failure leaves the saved question without a
         # verified final record, or is delivered with a different kind or text than was saved.
         def ambiguous_history(fixture):
-            fixture.answers['history_needed']['noul'] = 1.
+            ask_history_once(fixture)
             fixture.history()
             fixture.history_kind = fixture.routing_status = 'ambiguous'
 
@@ -420,7 +431,7 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
             fixture.destinations = ()
 
         def uncertain_history(fixture):
-            fixture.answers['history_needed']['noul'] = 1.
+            ask_history_once(fixture)
             fixture.history()
             fixture.history_verdict = 'uncertain'
         text = 'Our support team can help with this. You can request a support handoff.'
@@ -440,7 +451,10 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 offer = await asyncio.to_thread(self.fixture.storage.exact_offer, body['outcome']['offer_id'],
                                                 timeout=1.)
                 self.assertEqual(offer['metadatas'][0]['reason_code'], reason)
-                self.assertEqual(self.fixture.producer_calls, [])
+                # No answer is produced; at most the history owner's request ran, and it never saw history.
+                self.assertLessEqual(len(self.fixture.producer_calls), 1)
+                self.assertFalse(any(row['source_kind'] == 'owned_history'
+                                     for call in self.fixture.producer_calls for row in call['evidence']))
 
     async def test_a_deadline_after_the_saved_question_leaves_a_verified_technical_record(self):
         # Break caught: a stop after the question was saved leaves it without a final record (unreadable

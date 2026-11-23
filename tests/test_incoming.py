@@ -83,7 +83,7 @@ def judgment_answers():
                    'probabilities': {label: float(label == choice) for label in labels}}
               for key, (choice, labels) in choices.items()}
     for key in ('company_wide_topic', 'topic_hr', 'topic_it_support', 'topic_facilities_admin',
-                'topic_billing_payments', 'topic_shipping_delivery', 'history_needed',
+                'topic_billing_payments', 'topic_shipping_delivery',
                 'prompt_injection', 'sql_injection', 'profile_override_attempt', 'access_concern'):
         result[key] = {'type': 'noul', 'noul': 0.0}
     result['severity'] = {'type': 'score', 'score': 0.0, 'confidence': 1.0,

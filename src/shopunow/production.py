@@ -23,6 +23,7 @@ class ProducerInput:
     other_parts: tuple[str,...] = ()  # Other requested parts, answered by other producers, never by this one.
     own_notes: tuple[str,...] = ()  # Refusal/handoff topics inside this answered part (R4); never their content.
     correction: tuple[str,...] = ()  # Slice 5: final-review defects for this producer; empty outside correction.
+    history_owner: bool = False  # Owner 2026-11-23: only this part may request an earlier conversation.
 
 
 class ProducerReply(BaseModel):
@@ -85,6 +86,7 @@ def run_producer(context, *, models, budget, timeout):
         payload={'request_id':context.request_id,'part':context.part,'question':context.question,
             'response_style':context.response_style,'unresolved_parts':list(context.unresolved_parts),
             'dependency':context.dependency,'missing_context':context.missing_context,
+            'history_owner':context.history_owner,
             'other_parts':list(context.other_parts),'own_notes':list(context.own_notes),
             'part_outcomes':[{'part':row.part,'outcome':row.kind} for row in context.part_outcomes],
             'evidence':[{'excerpt_id':row.excerpt_id,'source_kind':row.source_kind,
@@ -243,6 +245,8 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
     except ValueError:
         return ProductionResult('technical_failure')
     parts=tuple(part for part in destinations if part!='central_support')
+    # Owner 2026-11-23: one department -> its specialist owns history; otherwise central support does.
+    owner=parts[0] if len(parts)==1 and 'central_support' not in destinations else 'central_support'
     request,profile,request_id=service.request,service.profile,service.request_id
     base_dispositions=tuple(dict.fromkeys((*evidence.dispositions,
         *(PartDisposition(part,'refusal') for part in evidence.refused_parts),
@@ -284,7 +288,8 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
             tuple(row for row in rows if row.destination in (part,'history','preference')),
             evidence.response_style,producer_unresolved(part,base_unresolved),dependency=evidence.dependency,
             part_outcomes=outcomes(part),
-            other_parts=tuple(other for other in destinations if other!=part),own_notes=notes(part))
+            other_parts=tuple(other for other in destinations if other!=part),own_notes=notes(part),
+            history_owner=part==owner)
 
     def context_timeout(context,specialist=False):
         remaining=timeout(specialist)
@@ -294,9 +299,11 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
         return remaining
 
     blocked=(set(evidence.refused_parts)|set(evidence.handoff_parts))-noted|set(evidence.security_fallback_parts)
-    eligible=tuple(part for part in destinations if part not in blocked and any(
+    # The history owner runs even without evidence, but may then only request history (see factual()).
+    owner_may_ask=owner not in blocked and evidence.kind!='clarification_needed'
+    eligible=tuple(part for part in destinations if part not in blocked and (part==owner and owner_may_ask or any(
         row.source_kind in ('knowledge','owned_history') and row.destination in (part,'history')
-        for row in evidence.cleared))
+        for row in evidence.cleared)))
     base_dispositions=tuple(dict.fromkeys((*base_dispositions,*(PartDisposition(part,
         'clarification_needed' if evidence.kind=='clarification_needed' else 'insufficient_evidence')
         for part in destinations if part not in eligible and part not in blocked))))
@@ -306,6 +313,7 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
     consumed=False  # One supplementary opportunity across all specialists and CentralSupport.
     supplementary_unresolved={}
     supplementary_dispositions=[]  # Only coordinator-received supplementary results enter the boundary.
+    history_answered=set()  # Owner parts whose missing facts the history search supplied (no longer unresolved).
     security_failure=False
     executor=ThreadPoolExecutor(max_workers=3,thread_name_prefix='shopunow-production')
 
@@ -319,6 +327,9 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
         if kind in ('clarification_needed','technical_failure','refusal','handoff_needed'):
             return kind
         return 'security_fallback' if kind in ('security_fallback','security_uncertain') else 'insufficient_evidence'
+
+    def factual(context):
+        return any(row.source_kind in ('knowledge','owned_history') for row in context.evidence)
 
     def resumable(part):
         # Only independent parts with their own admitted facts may answer without the missing context.
@@ -384,8 +395,10 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
                         if extra.kind in ('security_fallback','security_uncertain'):
                             security_failure=True
                         if extra.kind=='ready' and part in extra.destinations:
+                            history_answered.add(part)
                             contexts[part]=replace(context_for(part,extra.cleared),unresolved_parts=tuple(
-                                dict.fromkeys((*base_unresolved,*supplementary_unresolved[part]))))
+                                other for other in dict.fromkeys((*base_unresolved,*supplementary_unresolved[part]))
+                                if other!=part))
                             continuation=part
                         elif extra.kind=='insufficient_evidence' and resumable(part):
                             # The empty search describes the missing history, not this answerable part.
@@ -406,8 +419,10 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
                         context_timeout(contexts[part],True)
                     except Exception:
                         outcome=Contribution(part,'technical_failure')
+                    if outcome.kind!='context_needed' and not factual(contexts[part]):
+                        outcome=Contribution(part,'insufficient_evidence')  # Without evidence: only ask for history.
                     if outcome.kind=='context_needed':
-                        if consumed:
+                        if consumed or part!=owner:
                             terminal[part]=Contribution(part,'insufficient_evidence',target=outcome.target)
                         else:
                             requests[part]=outcome
@@ -438,15 +453,30 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
             return {'result':ProductionResult(kind,draft,membership,
                 draft.unresolved_parts if draft is not None else unresolved,findings,retained,dispositions)}
 
-        unresolved=tuple(dict.fromkeys((*base_unresolved,*state['missing'],
+        unresolved=tuple(dict.fromkeys((*(part for part in base_unresolved if part not in history_answered),
+            *state['missing'],
             *(row.part for row in frozen if row.kind!='supported_answer'),
             *(part for row in frozen for part in row.unresolved_parts),
             *(part for values in supplementary_unresolved.values() for part in values))))
         if security_failure:
             return result('security_fallback')
-        if unresolved and evidence.dependency!='independent':
-            return result('clarification_needed' if evidence.dependency=='unclear' else 'insufficient_evidence')
+        central_owner=owner=='central_support' and owner_may_ask
+        # A central owner may still supply its own part from history; the check repeats after its answer.
+        if (any(part!='central_support' or not central_owner for part in unresolved)
+                and evidence.dependency!='independent'):
+            # A refused necessary premise (e.g. refused history) stays a refusal (challenge T2).
+            refused=evidence.dependency=='dependent' and any(row.kind=='refusal'
+                                                             for row in (*frozen,*supplementary_dispositions))
+            return result('refusal' if refused else
+                          'clarification_needed' if evidence.dependency=='unclear' else 'insufficient_evidence')
         supported=tuple(row for row in frozen if row.kind=='supported_answer')
+
+        def fallback():
+            kinds={row.kind for row in (*base_dispositions,*supplementary_dispositions,*frozen)}
+            kind=next((value for value in ('security_fallback','technical_failure','clarification_needed',
+                'refusal','handoff_needed') if value in kinds),
+                'technical_failure' if state['missing'] else 'insufficient_evidence')
+            return result(kind)
         try:
             timeout()
             # Another unfinished requested part needs synthesis, so the draft cannot look complete.
@@ -456,7 +486,7 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
                 answer=supported[0]  # Exact pass-through; no extra author or synthesis call.
                 context_timeout(contexts[answer.part])
                 authors=(answer.part,)
-            elif supported or 'central_support' in eligible:
+            elif supported or central_owner:
                 allowed_ids={identity for row in supported for identity in row.cited_ids}
                 pool={row.excerpt_id:row for part in membership for row in contexts[part].evidence
                       if row.excerpt_id in allowed_ids}
@@ -468,11 +498,14 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
                     producer_unresolved('central_support',unresolved),frozen,
                     dependency=evidence.dependency,part_outcomes=outcomes('central_support'),
                     own_notes=notes('central_support'))
+                central=replace(central,history_owner=owner=='central_support')
                 answer=run_producer(central,models=models,budget=budget,timeout=lambda:context_timeout(central))
                 authors=(*(row.part for row in supported),'central_support')
-                # Synthesis added only because another part is unfinished never opens a history search.
-                gap_only=len(supported)==1 and 'central_support' not in destinations and other_gap
-                if answer.kind=='context_needed' and not consumed and not gap_only:
+                if answer.kind!='context_needed' and not factual(central):
+                    answer=None
+                    return fallback()  # Without evidence central support may only ask for history.
+                # Only the history owner opens a search (gap-only synthesis for one department never does).
+                if answer.kind=='context_needed' and not consumed and owner=='central_support':
                     consumed=True
                     earlier_unresolved=set(unresolved)  # Status known before this search must survive its resume.
                     extra=service.supplementary(target=answer.target,work_timeout=timeout)
@@ -484,6 +517,7 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
                         answer=Contribution('central_support','security_fallback')
                         return result('security_fallback')
                     if extra.kind=='ready':
+                        unresolved=tuple(part for part in unresolved if part!='central_support')  # History supplied it.
                         # The same frozen contributors remain; new history adds context, never late membership.
                         pool.update((row.excerpt_id,row) for row in extra.cleared
                                     if row.destination in ('central_support','history','preference'))
@@ -506,11 +540,7 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
                         answer=Contribution('central_support',supplementary_kind(extra.kind),target=answer.target)
                 context_timeout(central)
             else:
-                kinds={row.kind for row in (*base_dispositions,*supplementary_dispositions,*frozen)}
-                kind=next((value for value in ('security_fallback','technical_failure','clarification_needed',
-                    'refusal','handoff_needed') if value in kinds),
-                    'technical_failure' if state['missing'] else 'insufficient_evidence')
-                return result(kind)
+                return fallback()
             unresolved=tuple(dict.fromkeys((*unresolved,*answer.unresolved_parts,
                 *((answer.part,) if answer.kind!='supported_answer' else ()))))
             if answer.kind!='supported_answer':

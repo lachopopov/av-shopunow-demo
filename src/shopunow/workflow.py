@@ -12,7 +12,6 @@ class IncomingDecision:
     destinations: tuple[str, ...] = ()
     refused_departments: tuple[str, ...] = ()
     dependency: str = 'independent'
-    history_needed: bool = False
     intent: str = 'unclear_or_other'
     requires_action_handoff: bool = False  # Mixed requests retain the unresolved action part.
     proposed_destinations: tuple[str, ...] = ()  # Search hints, never dispatch or permission.
@@ -101,17 +100,16 @@ def build_incoming_graph(*, judge, reviewer, authorize, security_trigger=None, t
         kind = 'continue'
         if answers['sentiment'].choice == 'negative':
             kind = 'handoff'  # Whole-request escalation follows security and access checks.
-        elif (answers['intent'].choice=='information'
-              and answers['history_needed'].noul>=topic_trigger):
-            kind='history_resolution'  # Resolve the historical subject before first dispatch or topic refusal.
-            refused=()  # Initial topics are provisional; reviewed history must pass access again.
         elif refused and (not destinations or dependency != 'independent'):
             kind = 'refusal'
         elif answers['intent'].choice == 'unclear_or_other':
             kind = 'clarification'
-        elif answers['intent'].choice == 'individual_case_or_action' or (not destinations and not (
-                semantic_confidence_trigger is not None and proposed)):
+        elif answers['intent'].choice == 'individual_case_or_action':
             kind = 'handoff'
+        elif not destinations and not (semantic_confidence_trigger is not None and proposed):
+            # Owner 2026-11-23: information naming no department goes to central support, the history owner.
+            kind = 'continue' if answers['intent'].choice == 'information' else 'handoff'
+            destinations = ('central_support',) if kind == 'continue' else ()
         # Only a low-confidence action label with a possible route may be checked; a confident one hands off.
         action_label=answers['intent'].choice=='individual_case_or_action'
         weak_action=(action_label and bool(proposed)
@@ -125,8 +123,7 @@ def build_incoming_graph(*, judge, reviewer, authorize, security_trigger=None, t
         if kind != 'continue':
             destinations = ()
         intent = answers['intent'].choice
-        return {'decision': IncomingDecision(kind, destinations, refused, dependency,
-            answers['history_needed'].noul >= topic_trigger, intent,
+        return {'decision': IncomingDecision(kind, destinations, refused, dependency, intent,
             intent in ('mixed', 'individual_case_or_action'),proposed,MappingProxyType(answers))}
 
     # Conditional edges forbid access routing after any non-clear safety disposition.
@@ -201,7 +198,7 @@ def run_incoming(*, request, profile, transcript, attempt, tracking, storage, re
         return None
     if observe_decision is not None:
         observe_decision(decision)  # Private composition state, never a saved/delivered-result assertion.
-    if decision.kind in ('continue','history_resolution','semantic_resolution') and on_cleared is not None:
+    if decision.kind in ('continue','semantic_resolution') and on_cleared is not None:
         if model_budget is None:
             raise ValueError('Evidence continuation requires the original model budget.')
         on_cleared(decision)  # Internal observation only; later terminal persistence still gates delivery.

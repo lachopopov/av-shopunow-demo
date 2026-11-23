@@ -264,46 +264,6 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(result.kind,'refusal')
         self.assertEqual(result.refused_parts,('hr',))
 
-    def test_partial_adjudication_does_not_invent_independence_for_missing_history(self):
-        from tests.test_incoming import judgment_answers
-        from shopunow.incoming import validate_judgments
-        self.service.semantic_confidence_trigger=.7
-        self.service.topic_trigger=.5
-        self.service.answer_models,calls=self.semantic_adapter()
-        original=self.service.answer_models.resolve_routing
-        self.service.answer_models.resolve_routing=lambda payload,**kwargs:{
-            **original(payload,**kwargs),'dependency':None}
-        answers=judgment_answers()
-        answers['department_dependency'].update(confidence=.4,probabilities={
-            'independent':.6,'dependent':.39,'unclear':.01})
-        result=self.service.prepare(IncomingDecision('history_resolution',history_needed=True,intent='information',
-            dependency='independent',proposed_destinations=('shipping_delivery',),judgments=validate_judgments(answers)))
-        self.assertEqual(result.dependency,'unclear')
-        self.assertEqual(result.cleared,())
-        self.assertFalse(any(isinstance(call,tuple) and call[0]=='knowledge' for call in self.storage.calls))
-
-    def test_uncertain_history_routing_is_adjudicated_before_access_and_generation(self):
-        from tests.test_incoming import judgment_answers
-        from shopunow.incoming import validate_history_route,HISTORY_ROUTE_FIELDS
-        for destination,want in (('shipping_delivery','ready'),('hr','refusal')):
-            with self.subTest(destination=destination):
-                self.setUp()
-                self.identity_fixture(confidence=1.,label='clear')
-                self.models.relevance=lambda question,candidates,**kwargs:relevance_answers(candidates)
-                def history_route(*args,**kwargs):
-                    answers=judgment_answers()
-                    answers['topic_shipping_delivery']['noul']=.6
-                    answers['topic_hr']['noul']=.6  # Either historical subject genuinely remains unsettled.
-                    return validate_history_route({key:answers[key] for key in HISTORY_ROUTE_FIELDS})
-                self.models.history_route=history_route
-                self.service.answer_models,calls=self.semantic_adapter(destination=destination)
-                result=self.service.prepare(IncomingDecision('history_resolution',history_needed=True,intent='information'))
-                self.assertEqual(result.kind,want)
-                self.assertEqual(len(calls[0][1]['history']),2)
-                self.assertEqual([row.source_kind for row in result.cleared],
-                    ['owned_history','owned_history','knowledge'] if destination=='shipping_delivery' else [])
-                self.assertEqual(result.refused_parts,('hr',) if destination=='hr' else ())
-
     def test_opt_in_uncertain_intent_reaches_resolution_without_reopening_negative_or_settled_action(self):
         from tests.test_incoming import judgment_answers
         from shopunow.incoming import IncomingContext
@@ -386,24 +346,6 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(result.resolution_candidates,())
         self.assertEqual([stage for stage,_ in calls],['routing'])
         self.assertEqual(result.judgments['descriptors.source_SU_SD_001'].confidence,.4)
-
-    def test_missing_history_can_resolve_independent_current_work_without_history_text(self):
-        # Low confidence is not a forced stop when an explicit independent current part can be resolved.
-        from tests.test_incoming import judgment_answers
-        from shopunow.incoming import validate_judgments
-        answers=judgment_answers()
-        answers['topic_shipping_delivery']['noul']=.95
-        answers['department_dependency'].update(confidence=.4,probabilities={
-            'independent':.6,'dependent':.39,'unclear':.01})
-        self.service.semantic_confidence_trigger=.7
-        self.service.topic_trigger=.5
-        self.service.answer_models,calls=self.semantic_adapter()
-        result=self.service.prepare(IncomingDecision('history_resolution',history_needed=True,intent='information',
-            dependency='independent',proposed_destinations=('shipping_delivery',),judgments=validate_judgments(answers)))
-        self.assertEqual([row.source_record_id for row in result.cleared],['SU-SD-001'])
-        self.assertIn('history',result.unresolved_parts)
-        self.assertEqual(calls[0][1]['history'],[])
-        self.assertEqual(calls[0][1]['history_status'],'insufficient')
 
     def test_candidate_adjudication_cannot_use_unknown_ids_or_security_uncertain_text(self):
         from typesafe_sdk import ChoiceAnswer
@@ -501,8 +443,8 @@ class EvidenceTests(unittest.TestCase):
                     return validate_history_route({key:answers[key] for key in HISTORY_ROUTE_FIELDS})
                 self.models.relevance=relevance
                 self.models.history_route=history_route
-                result=self.service.prepare(IncomingDecision('history_resolution',history_needed=True,intent='information'))
-                self.assertEqual(result.cleared,())
+                result=self.recall()  # Owner 2026-11-23: the owner's history request, not a routing stage.
+                self.assertNotIn('owned_history',[row.source_kind for row in result.cleared])
                 self.assertEqual([row.source_kind for row in result.resolution_candidates],
                                  ['owned_history'] if subject=='shipping_delivery' and verdict=='clean' else [])
                 self.assertEqual(result.refused_parts,('hr',) if subject=='hr' else ())
@@ -532,69 +474,12 @@ class EvidenceTests(unittest.TestCase):
                 self.assertTrue(result.unresolved_judgments)
                 self.assertEqual(self.storage.calls.count('pending_write'),1)
 
-    def test_nonclear_history_recovers_only_descriptor_established_independent_current_work(self):
-        for history_kind,current,dependency,expected in (
-                ('insufficient',True,'independent','ready'),
-                ('ambiguous',True,'independent','clarification_needed'),
-                ('insufficient',False,'independent','insufficient_evidence'),
-                ('insufficient',True,'dependent','insufficient_evidence')):
-            with self.subTest(history_kind=history_kind,current=current,dependency=dependency):
-                self.setUp()
-                self.service.semantic_confidence_trigger=.7
-                self.service.topic_trigger=.5
-                pending,terminal=transcript_pair()
-                self.storage.history_rows=terminal
-                self.storage.header=lambda *args,**kwargs:header_result()
-                self.storage.events=lambda *args,**kwargs:event_result(pending,terminal)
-                def relevance(question,candidates,*,timeout):
-                    if candidates[0].source_kind=='owned_history':
-                        return relevance_answers(candidates,history_kind,selected=())
-                    return relevance_answers(candidates,selected=None if current else ())
-                self.models.relevance=relevance
-                result=self.service.prepare(IncomingDecision('history_resolution',history_needed=True,
-                    intent='information',dependency=dependency,proposed_destinations=('shipping_delivery',)))
-                self.assertEqual(result.kind,expected)
-                self.assertEqual([row.source_kind for row in result.cleared],
-                                 ['knowledge'] if current and dependency=='independent' else [])
-                self.assertEqual(result.resolution_candidates,())
-                self.assertIn('history',result.unresolved_parts)
-                self.assertEqual(self.storage.calls.count('pending_write'),1)
-
-    def test_empty_or_unselected_history_keeps_independent_current_help(self):
-        # A missing recap must not suppress a separately requested current explanation.
-        for pool,dependency,current in (('empty','independent',True),
-                ('unselected','independent',True),('empty','dependent',True),
-                ('empty','independent',False)):
-            with self.subTest(pool=pool,dependency=dependency,current=current):
-                self.setUp()
-                self.service.semantic_confidence_trigger=.7
-                self.service.topic_trigger=.5
-                self.request.question='Recap my earlier delivery issue; separately explain tracking.'
-                if pool=='unselected':
-                    pending,terminal=transcript_pair()
-                    self.storage.history_rows=terminal
-                    self.storage.header=lambda *args,**kwargs:header_result()
-                    self.storage.events=lambda *args,**kwargs:event_result(pending,terminal)
-                def relevance(question,candidates,*,timeout):
-                    return relevance_answers(candidates,selected=() if (
-                        candidates[0].source_kind=='owned_history' or not current) else None)
-                self.models.relevance=relevance
-                result=self.service.prepare(IncomingDecision('history_resolution',history_needed=True,
-                    intent='information',dependency=dependency,proposed_destinations=('shipping_delivery',)))
-                supported=current and dependency=='independent'
-                self.assertEqual(result.kind,'ready' if supported else 'insufficient_evidence')
-                self.assertEqual([row.source_record_id for row in result.cleared],
-                                 ['SU-SD-001'] if supported else [])
-                self.assertEqual(result.resolution_candidates,())
-                self.assertIn('history',result.unresolved_parts)
-                self.assertEqual(self.storage.calls.count('pending_write'),1)
-
     def test_graph_current_recovery_resolves_only_superseded_topic_uncertainty(self):
         from shopunow.incoming import IncomingContext
         from shopunow.workflow import build_incoming_graph
         from tests.test_incoming import judgment_answers
         # Descriptor relevance can replace a weak topic; it cannot settle intent or dependency.
-        for weak in ('topic','history_needed','intent','department_dependency','sentiment'):
+        for weak in ('topic','intent','department_dependency','sentiment'):
             with self.subTest(weak=weak):
                 self.setUp()
                 self.service.semantic_confidence_trigger=.7
@@ -602,7 +487,6 @@ class EvidenceTests(unittest.TestCase):
                 self.request.question='Recap my prior delivery case; separately explain tracking.'
                 answers=judgment_answers()
                 answers['topic_shipping_delivery']['noul']=.53
-                answers['history_needed']['noul']=.6 if weak=='history_needed' else 1.0
                 if weak in ('intent','department_dependency','sentiment'):
                     answer=answers[weak]
                     answer['confidence']=.4
@@ -611,24 +495,24 @@ class EvidenceTests(unittest.TestCase):
                 graph=build_incoming_graph(judge=lambda context:answers,reviewer=None,authorize=lambda:True,
                     security_trigger=.7,topic_trigger=.5,semantic_confidence_trigger=.7)
                 decision=graph.invoke({'context':IncomingContext(self.request.question,'customer',None,(),False)})['decision']
-                self.assertEqual(decision.kind,'history_resolution')
+                self.assertEqual(decision.kind,'continue')  # Owner 2026-11-23: history no longer routes.
                 result=self.service.prepare(decision)
                 # Owner decision 2026-11-19 (R3): a weak sentiment label never holds back evidence.
-                supported=weak in ('topic','history_needed','sentiment')
+                supported=weak in ('topic','sentiment')
                 self.assertEqual([row.source_record_id for row in result.cleared],
                                  ['SU-SD-001'] if supported else [])
-                self.assertEqual(result.destinations,('shipping_delivery',) if weak not in (
-                    'intent','department_dependency') else ())
-                self.assertIn('history',result.unresolved_parts)
+                # The descriptor settles the topic; a weak dependency stays unresolved (checked below).
+                self.assertEqual(result.destinations,('shipping_delivery',) if weak!='intent' else ())
+                if weak=='department_dependency':
+                    self.assertIn('incoming.department_dependency',result.unresolved_judgments)
+                # A weak intent or dependency keeps the row as resolution context only, never as a fact.
                 self.assertEqual([row.source_record_id for row in result.resolution_candidates],
-                                 ['SU-SD-001'] if weak=='intent' else [])
+                                 ['SU-SD-001'] if weak in ('intent','department_dependency') else [])
                 if weak=='intent':
                     self.assertEqual(result.cleared,())
                     self.assertIn('incoming.intent',result.unresolved_judgments)
                 self.assertEqual(self.storage.calls.count('pending_write'),1)
                 self.assertIn('incoming.topic_shipping_delivery',result.judgments)
-                if weak=='history_needed':
-                    self.assertIn('incoming.history_needed',result.unresolved_judgments)
                 if weak=='sentiment':
                     self.assertNotIn('incoming.sentiment',result.unresolved_judgments)
 
@@ -723,23 +607,19 @@ class EvidenceTests(unittest.TestCase):
                         candidates[0].source_kind!='owned_history' and not current) else None)
                 self.models.review=review
                 self.models.relevance=relevance
-                result=self.service.prepare(IncomingDecision('history_resolution',history_needed=True,
-                    intent='information',dependency=dependency,proposed_destinations=('shipping_delivery',)))
-                self.assertEqual(result.kind,expected)
-                self.assertEqual([r.source_record_id for r in result.cleared],['SU-SD-001'] if expected=='ready' else [])
+                # Owner 2026-11-23: Knowledge is searched first; history only on the owner's request.
+                result=self.recall(intent='information',dependency=dependency)
+                # Required safety: reviewed malicious/uncertain/unreviewed history is never usable context.
                 self.assertFalse(any(r.source_kind=='owned_history' for r in result.cleared+result.resolution_candidates))
                 self.assertEqual(self.storage.calls.count('pending_write'),1)
-                if expected=='ready':
-                    self.assertIn('history',result.unresolved_parts)
-                if verdict in ('uncertain','invalid','capped'):
-                    self.assertFalse(any(isinstance(c,tuple) and c[0]=='knowledge' for c in self.storage.calls))
+                if verdict in ('uncertain','invalid'):
+                    self.assertEqual(result.kind,'security_fallback')
 
     def test_weak_information_intent_prepares_only_general_resolution_candidates(self):
         from shopunow.incoming import IncomingContext
         from shopunow.workflow import build_incoming_graph
         from tests.test_incoming import judgment_answers
         answers=judgment_answers()
-        answers['history_needed']['noul']=1.0
         answers['topic_shipping_delivery']['noul']=.95
         answers['intent'].update(confidence=.4,probabilities={
             'information':.55,'individual_case_or_action':.15,'mixed':.15,'unclear_or_other':.15})
@@ -837,7 +717,7 @@ class EvidenceTests(unittest.TestCase):
                 self.service.history_identity_resolver=resolve
                 self.models.history_route=route
                 self.models.verdict=verdict
-                result=self.service.prepare(IncomingDecision('history_resolution',history_needed=True,intent='information'))
+                result=self.recall(intent='information')
                 self.assertEqual(len(observed),1)
                 self.assertEqual(observed[0][0],self.request.question)
                 self.assertEqual(len(observed[0][1]),2)
@@ -860,7 +740,7 @@ class EvidenceTests(unittest.TestCase):
                 if enabled:
                     self.service.history_identity_resolver=lambda *args,**kwargs: calls.append(args) or {
                         'status':'insufficient','selected_excerpt_ids':[]}
-                result=self.service.prepare(IncomingDecision('history_resolution',history_needed=True,intent='information'))
+                result=self.recall(intent='information')
                 self.service.supplementary(target='A different missing historical relationship')
                 self.assertEqual(len(calls),want_calls)
                 self.assertEqual(result.cleared,())
@@ -884,7 +764,7 @@ class EvidenceTests(unittest.TestCase):
                         return {'status':'clear','selected_excerpt_ids':['e1']}
                     return outcome
                 self.service.history_identity_resolver=resolve
-                result=self.service.prepare(IncomingDecision('history_resolution',history_needed=True,intent='information'))
+                result=self.recall(intent='information')
                 self.assertEqual(result.kind,expected)
                 self.assertEqual(result.cleared+result.resolution_candidates,())
                 self.assertFalse(any(isinstance(c,tuple) and c[0]=='review' for c in self.models.calls))
@@ -923,7 +803,7 @@ class EvidenceTests(unittest.TestCase):
                         self.prepare()
                         result=self.service.supplementary(target='Identify the missing earlier exchange.')
                     else:
-                        result=self.prepare(history_needed=True)
+                        result=self.recall()
                     self.assertEqual(routed,[wanted])
                     self.assertEqual([r.source_record_id for r in result.cleared],
                                      [wanted] if subject=='shipping_delivery' else [])
@@ -938,7 +818,6 @@ class EvidenceTests(unittest.TestCase):
         self.models.relevance=lambda question,candidates,**kwargs: native_relevance(question,candidates,**kwargs) if (
             candidates[0].source_kind=='owned_history') else relevance_answers(candidates)
         answers=judgment_answers()
-        answers['history_needed']['noul']=1.0
         answers['intent'].update(confidence=.4,probabilities={
             'information':.55,'individual_case_or_action':.15,'mixed':.15,'unclear_or_other':.15})
         self.service.history_identity_resolver=lambda question,candidates,**kwargs: {
@@ -946,11 +825,10 @@ class EvidenceTests(unittest.TestCase):
         graph=build_incoming_graph(judge=lambda context:answers,reviewer=None,authorize=lambda:True,
             security_trigger=.7,topic_trigger=.5,semantic_confidence_trigger=.7)
         decision=graph.invoke({'context':IncomingContext(self.request.question,'customer',None,(),False)})['decision']
-        result=self.service.prepare(decision)
-        self.assertEqual(result.cleared,())
-        self.assertEqual(result.destinations,())
-        self.assertEqual(result.kind,'insufficient_evidence')
-        self.assertEqual([r.source_kind for r in result.resolution_candidates],['owned_history','knowledge'])
+        self.service.prepare(decision)
+        result=self.service.supplementary(target=self.request.question)  # The owner's history request.
+        self.assertEqual(result.cleared,())  # Neither history nor Knowledge becomes a fact under a weak intent.
+        self.assertIn('owned_history',[r.source_kind for r in result.resolution_candidates])
         self.assertIn('incoming.intent',result.unresolved_judgments)
 
     def test_identity_late_access_cannot_release_a_conversation_excluded_during_routing(self):
@@ -969,66 +847,21 @@ class EvidenceTests(unittest.TestCase):
                     self.prepare()
                     result=self.service.supplementary(target='Recover the missing historical context.')
                 else:
-                    result=self.prepare(history_needed=True)
+                    result=self.recall()
                 self.assertEqual(result.kind,'technical_failure')
                 self.assertEqual(result.cleared+result.resolution_candidates,())
                 self.assertIn(('history','technical_failure'),[(row.part,row.kind) for row in result.dispositions])
-
-    def test_weak_intent_recovery_preserves_dependency_action_and_non_general_boundaries(self):
-        from tests.test_incoming import judgment_answers
-        from shopunow.incoming import validate_judgments
-        for dependency,action,scope in (('dependent',False,'public_general'),
-                ('unclear',False,'public_general'),('independent',True,'public_general'),
-                ('independent',False,'customer_personal_handoff')):
-            with self.subTest(dependency=dependency,action=action,scope=scope):
-                self.setUp()
-                self.service.semantic_confidence_trigger=.7
-                self.service.topic_trigger=.5
-                if scope!='public_general':
-                    record=self.k.KnowledgeRecord.model_validate_json(__import__('json').dumps(source_row(
-                        classification='non_general',access_scope=scope)))
-                    self.service.catalog={record.source_id:record}
-                answers=judgment_answers()
-                answers['intent'].update(confidence=.4,probabilities={
-                    'information':.55,'individual_case_or_action':.15,'mixed':.15,'unclear_or_other':.15})
-                result=self.service.prepare(IncomingDecision('history_resolution',intent='information',
-                    history_needed=True,dependency=dependency,requires_action_handoff=action,
-                    proposed_destinations=('shipping_delivery',),judgments=validate_judgments(answers)))
-                self.assertEqual(result.cleared+result.resolution_candidates,())
-                self.assertEqual(result.destinations,())
-                self.assertFalse(any(isinstance(call,tuple) and call[0]=='knowledge' for call in self.storage.calls))
 
     def test_identity_adjudication_cannot_reset_exhausted_shared_model_budget(self):
         self.identity_fixture()
         called=[]
         self.service.history_identity_resolver=lambda *args,**kwargs:called.append(args)
         self.service.budget=self.e.ModelBudget(attempts=39)
-        result=self.service.prepare(IncomingDecision('history_resolution',history_needed=True,intent='information'))
+        result=self.recall(intent='information')
         self.assertEqual(result.kind,'technical_failure')
         self.assertEqual(result.cleared+result.resolution_candidates,())
         self.assertEqual(called,[])
         self.assertEqual(self.service.budget.attempts,40)
-
-    def test_supplementary_identity_access_rechecks_previously_admitted_history_too(self):
-        earlier=str(UUID(int=900))
-        self.identity_fixture(confidence=1.,label='clear',conversation=earlier)
-        previous_relevance=self.models.relevance
-        self.models.relevance=lambda question,candidates,**kwargs: relevance_answers(candidates,
-            selected=(candidates[0].excerpt_id,)) if candidates[0].source_kind=='owned_history' else (
-                previous_relevance(question,candidates,**kwargs))
-        initial=self.service.prepare(IncomingDecision('history_resolution',history_needed=True,intent='information'))
-        self.assertEqual([r.conversation_id for r in initial.cleared],[earlier])
-        self.identity_fixture(conversation=str(UUID(int=901)))
-        allowed_route=self.models.history_route
-        def route(question,candidates,**kwargs):
-            self.tracking.exclude_conversation(earlier)
-            return allowed_route(question,candidates,**kwargs)
-        self.models.history_route=route
-        self.service.history_identity_resolver=lambda question,candidates,**kwargs: {
-            'status':'clear','selected_excerpt_ids':[candidates[1].excerpt_id]}
-        result=self.service.supplementary(target='Find the missing independent historical exchange.')
-        self.assertEqual(result.kind,'technical_failure')
-        self.assertEqual(result.cleared+result.resolution_candidates,())
 
     def test_denied_identity_history_preserves_a_genuinely_uncovered_current_part(self):
         from tests.test_incoming import judgment_answers
@@ -1044,16 +877,21 @@ class EvidenceTests(unittest.TestCase):
         self.models.history_route=route
         self.service.history_identity_resolver=lambda question,candidates,**kwargs: {
             'status':'clear','selected_excerpt_ids':[candidates[1].excerpt_id]}
-        result=self.service.prepare(IncomingDecision('continue',intent='information',history_needed=True,
-            destinations=('shipping_delivery','billing_payments')))
-        self.assertEqual(result.kind,'ready')
+        first=self.prepare(intent='information',destinations=('shipping_delivery','billing_payments'))
+        self.assertIn('billing_payments',first.unresolved_parts)  # The uncovered current part stays visible.
+        result=self.service.supplementary(target=self.request.question)  # Owner's request; hr history is denied.
+        self.assertEqual(result.kind,'insufficient_evidence')  # The denied history supplied nothing.
         self.assertEqual([r.source_record_id for r in result.cleared],['SU-SD-001'])
-        self.assertIn('billing_payments',result.unresolved_parts)
         self.assertIn('hr',result.refused_parts)
 
     def prepare(self, **changes):
-        decision = IncomingDecision(**dict(kind='continue',destinations=('shipping_delivery',),**changes))
+        decision = IncomingDecision(**{'kind':'continue','destinations':('shipping_delivery',),**changes})
         return self.service.prepare(decision)
+
+    def recall(self, **changes):
+        # Owner 2026-11-23: history enters only when the owner asks (context_needed) after preparation.
+        self.prepare(**changes)
+        return self.service.supplementary(target=self.service.request.question)
 
     def test_pending_is_verified_before_retrieval_and_only_clean_ids_reach_receiver(self):
         result = self.prepare()
@@ -1110,8 +948,6 @@ class EvidenceTests(unittest.TestCase):
             ('handoff', ('shipping_delivery',), 'clear', False, (), 'handoff_needed', (), ('shipping_delivery',)),
             ('conflict', ('shipping_delivery',), 'clear', False, (), 'insufficient_evidence', ('shipping_delivery',), ('shipping_delivery',)),
             ('refusal', ('shipping_delivery','billing_payments'), 'clear', False, (), 'insufficient_evidence', ('shipping_delivery',), ()),
-            ('handoff', ('shipping_delivery',), 'clear', True, ('hr',), 'clarification_needed', ('hr',), ('shipping_delivery',)),
-            ('none', ('shipping_delivery',), 'clear', True, ('hr',), 'insufficient_evidence', ('hr',), ()),
             ('none', ('shipping_delivery',), 'raise', False, ('hr',), 'technical_failure', ('hr',), ()),
         )
         for label,destinations,descriptor_kind,history,refused,kind,want_refused,want_handoffs in cases:
@@ -1142,7 +978,7 @@ class EvidenceTests(unittest.TestCase):
                     return relevance_answers(candidates,*('insufficient',(),()))
                 self.models.relevance = relevance
                 result = self.service.prepare(IncomingDecision('continue',destinations=destinations,
-                    history_needed=history,refused_departments=refused))
+                    refused_departments=refused))
                 self.assertEqual(result.kind,kind)
                 self.assertEqual(result.refused_parts,want_refused)
                 self.assertEqual(result.handoff_parts,want_handoffs)
@@ -1184,7 +1020,7 @@ class EvidenceTests(unittest.TestCase):
                             'malicious','uncertain') and row.source_kind=='owned_history' else 'clean'}
                             for row in candidates]
                     self.models.review=review
-                result=self.prepare(history_needed=True,dependency='independent')
+                result=self.recall(dependency='independent')
                 self.assertIn(('history',wanted),[(row.part,row.kind) for row in
                     getattr(result,'dispositions',())],'The evidence boundary lost the actual historical outcome')
                 self.assertFalse(any(row.source_kind=='owned_history' for row in result.cleared))
@@ -1203,9 +1039,9 @@ class EvidenceTests(unittest.TestCase):
                 if entry=='supplementary':
                     result=self.service.supplementary(target='Earlier parcel correction')
                 elif entry=='predispatch':
-                    result=self.service.prepare(IncomingDecision('history_resolution',history_needed=True,intent='information'))
+                    result=self.recall(intent='information')
                 else:
-                    result=self.prepare(history_needed=True)
+                    result=self.recall()
                 self.assertEqual(result.kind,'technical_failure')
                 self.assertFalse(any(row.source_kind=='owned_history' for row in result.cleared))
                 self.assertIn(('history','technical_failure'),[(row.part,row.kind) for row in result.dispositions])
@@ -1225,148 +1061,6 @@ class EvidenceTests(unittest.TestCase):
         self.assertIn(('history','insufficient_evidence'),outcomes)
         self.assertNotIn(('history','security_fallback'),outcomes)
 
-    def test_independent_recall_reaches_history_without_granting_current_source_access(self):
-        # Recall can contribute independently; it cannot answer or erase a current restricted/action part.
-        for scope,history_kind,expected,dependent in (
-                ('customer_personal_handoff','clear','ready',False),
-                ('home_department_internal','clear','ready',False),
-                ('customer_personal_handoff','ambiguous','clarification_needed',False),
-                ('home_department_internal','clear','refusal',True)):
-            with self.subTest(scope=scope,history_kind=history_kind,dependent=dependent):
-                self.setUp()  # Each request retains its own admitted lease and pending linkage.
-                internal=self.k.KnowledgeRecord.model_validate_json(__import__('json').dumps(source_row(
-                    source_id='SU-SD-010',classification='non_general',access_scope=scope,
-                    eligible_audience=['employee'] if scope=='home_department_internal' else ['customer'])))
-                self.service.catalog={internal.source_id:internal}
-                pending,terminal=transcript_pair()
-                self.storage.history_rows=terminal
-                self.storage.header=lambda *args,**kwargs:header_result()
-                self.storage.events=lambda *args,**kwargs:event_result(pending,terminal)
-                def relevance(question,candidates,*,timeout):
-                    if candidates[0].source_kind=='owned_history':
-                        return relevance_answers(candidates,*(history_kind,tuple(row.excerpt_id for row in candidates),()))
-                    return relevance_answers(candidates,*('clear',tuple(row.excerpt_id for row in candidates),()))
-                self.models.relevance=relevance
-                result=self.prepare(history_needed=True,dependency='dependent' if dependent else 'independent')
-                self.assertEqual(result.kind,expected)
-                restricted=scope=='home_department_internal'
-                self.assertEqual(result.refused_parts,('shipping_delivery',) if restricted else ())
-                self.assertEqual(result.handoff_parts,() if restricted else ('shipping_delivery',))
-                self.assertEqual(result.pending_message_id,self.storage.pending.message_id)
-                self.assertFalse(any(isinstance(call,tuple) and call[0]=='knowledge' for call in self.storage.calls))
-                searched=any(isinstance(call,tuple) and call[0]=='history' for call in self.storage.calls)
-                self.assertEqual(searched,not dependent)
-                self.assertEqual([row.source_kind for row in result.cleared],
-                                 ['owned_history'] if expected=='ready' else [])
-                if expected=='ready':
-                    self.assertIn('shipping_delivery',result.unresolved_parts)
-                    self.assertEqual(result.cleared[0].clearance,'clean')
-
-    def test_department_free_recall_resolves_only_reviewed_history_and_applies_late_access(self):
-        from tests.test_incoming import judgment_answers
-        from shopunow.incoming import validate_history_route,HISTORY_ROUTE_FIELDS
-        for history_kind,verdict,topics,dependency,expected in (
-                ('ambiguous','clean',('shipping_delivery',),'independent','clarification_needed'),
-                ('insufficient','clean',('shipping_delivery',),'independent','insufficient_evidence'),
-                ('clear','malicious',('shipping_delivery',),'independent','insufficient_evidence'),
-                ('clear','uncertain',('shipping_delivery',),'independent','security_fallback'),
-                ('clear','clean',('shipping_delivery',),'independent','ready'),
-                ('clear','clean',('hr',),'independent','refusal'),
-                ('clear','clean',('hr','shipping_delivery'),'independent','clarification_needed'),
-                ('clear','clean',('hr','shipping_delivery'),'dependent','refusal')):
-            with self.subTest(history_kind=history_kind,verdict=verdict,topics=topics,dependency=dependency):
-                self.setUp()
-                self.service.topic_trigger=.5  # Explicit evaluated configuration, shared with incoming.
-                pending,terminal=transcript_pair()
-                self.storage.history_rows=terminal
-                self.storage.header=lambda *args,**kwargs:header_result()
-                self.storage.events=lambda *args,**kwargs:event_result(pending,terminal)
-                self.models.verdict=verdict
-                routed=[]
-                def history_route(question,candidates,**kwargs):
-                    routed.extend(candidates)
-                    answers=judgment_answers()
-                    for topic in topics:
-                        answers['topic_'+topic]['noul']=.9
-                    answers['department_dependency']['choice']=dependency
-                    answers['department_dependency']['probabilities']={
-                        name:float(name==dependency) for name in answers['department_dependency']['probabilities']}
-                    return validate_history_route({key:answers[key] for key in HISTORY_ROUTE_FIELDS})
-                self.models.history_route=history_route
-                def relevance(question,candidates,*,timeout):
-                    if candidates[0].source_kind=='owned_history':
-                        return relevance_answers(candidates,*(history_kind,tuple(row.excerpt_id for row in candidates),()))
-                    return relevance_answers(candidates,*('insufficient',(),()))  # A pure recap requests no current company source.
-                self.models.relevance=relevance
-                result=self.service.prepare(IncomingDecision('history_resolution',history_needed=True,intent='information'))
-                self.assertEqual(result.kind,expected)
-                self.assertEqual(result.pending_message_id,self.storage.pending.message_id)
-                self.assertEqual(self.storage.calls.count('pending_write'),1)
-                self.assertFalse(any(isinstance(call,tuple) and call[0]=='knowledge' for call in self.storage.calls))
-                self.assertEqual(bool(routed),history_kind=='clear' and verdict=='clean')
-                self.assertTrue(all(row.clearance=='clean' and row.source_kind=='owned_history' for row in routed))
-                self.assertEqual(result.refused_parts,('hr',) if 'hr' in topics else ())
-                self.assertEqual(result.destinations,('shipping_delivery',) if expected=='ready' else ())
-                self.assertEqual([row.source_kind for row in result.cleared],['owned_history'] if expected=='ready' else [])
-                if 'hr' in topics and 'shipping_delivery' in topics:
-                    self.assertEqual(result.unresolved_parts,('shipping_delivery',))
-
-    def test_resolved_recall_survives_current_source_disposition_without_repeated_history_work(self):
-        from tests.test_incoming import judgment_answers
-        from shopunow.incoming import validate_history_route,HISTORY_ROUTE_FIELDS
-        for scope in ('customer_personal_handoff','home_department_internal'):
-            with self.subTest(scope=scope):
-                self.setUp()
-                self.service.topic_trigger=.5
-                record=self.k.KnowledgeRecord.model_validate_json(__import__('json').dumps(source_row(
-                    classification='non_general',access_scope=scope,
-                    eligible_audience=['customer'] if scope=='customer_personal_handoff' else ['employee'])))
-                self.service.catalog={record.source_id:record}
-                pending,terminal=transcript_pair()
-                self.storage.history_rows=terminal
-                self.storage.header=lambda *args,**kwargs:header_result()
-                self.storage.events=lambda *args,**kwargs:event_result(pending,terminal)
-                def history_route(*args,**kwargs):
-                    answers=judgment_answers()
-                    answers['topic_shipping_delivery']['noul']=.9
-                    return validate_history_route({key:answers[key] for key in HISTORY_ROUTE_FIELDS})
-                self.models.history_route=history_route
-                result=self.service.prepare(IncomingDecision('history_resolution',history_needed=True,intent='information'))
-                self.assertEqual(result.kind,'ready')
-                self.assertEqual([row.source_kind for row in result.cleared],['owned_history'])
-                self.assertEqual(result.handoff_parts,('shipping_delivery',) if scope=='customer_personal_handoff' else ())
-                self.assertEqual(result.refused_parts,('shipping_delivery',) if scope=='home_department_internal' else ())
-                self.assertEqual(result.unresolved_parts,('shipping_delivery',))
-                self.assertEqual(self.service.searches,1)
-                self.assertEqual(self.storage.calls.count('pending_write'),1)
-                self.assertEqual([call for call in self.models.calls if isinstance(call,tuple) and call[0]=='review'],[('review',1)])
-
-    def test_descriptor_uncertainty_preserves_history_search_and_independent_destination(self):
-        # An uncertain Billing source class must not erase clear Shipping or block owned recall.
-        other=self.k.KnowledgeRecord.model_validate_json(__import__('json').dumps(source_row(
-            source_id='SU-BP-010',subject='billing_payments',classification='non_general',
-            access_scope='customer_personal_handoff')))
-        self.service.catalog[other.source_id]=other
-        pending,terminal=transcript_pair()
-        self.storage.history_rows=terminal
-        self.storage.header=lambda *args,**kwargs:header_result()
-        self.storage.events=lambda *args,**kwargs:event_result(pending,terminal)
-        def relevance(question,candidates,*,timeout):
-            if candidates[0].source_kind=='source_descriptor':
-                return relevance_answers(candidates,*('clear',('source_SU_SD_001',),('source_SU_BP_010',)))
-            return relevance_answers(candidates,*('clear',tuple(row.excerpt_id for row in candidates),()))
-        self.models.relevance=relevance
-        result=self.service.prepare(IncomingDecision('continue',
-            destinations=('shipping_delivery','billing_payments'),history_needed=True))
-        self.assertEqual(result.kind,'ready')
-        self.assertEqual({row.source_kind for row in result.cleared},{'knowledge','owned_history'})
-        self.assertIn('billing_payments',result.unresolved_parts)
-        self.assertEqual(result.handoff_parts,())
-        self.assertTrue(any(isinstance(call,tuple) and call[0]=='history' for call in self.storage.calls))
-        queries=[call[1] for call in self.storage.calls if isinstance(call,tuple) and call[0]=='knowledge']
-        self.assertEqual(len(queries),1)
-        self.assertIn({'subject':'shipping_delivery'},queries[0]['$and'])
-
     def test_uncertain_historical_candidate_is_not_asserted_unique_or_user_ambiguity(self):
         pending,terminal=transcript_pair()
         self.storage.history_rows=terminal
@@ -1378,10 +1072,10 @@ class EvidenceTests(unittest.TestCase):
                 return relevance_answers(candidates,*('clear',(),(candidates[0].excerpt_id,)))
             return relevance_answers(candidates,*('clear',tuple(row.excerpt_id for row in candidates),()))
         self.models.relevance=relevance
-        result=self.prepare(history_needed=True)
+        self.assertIn('shipping_delivery',self.prepare().unresolved_parts)
+        result=self.service.supplementary(target=self.request.question)
         self.assertEqual(result.kind,'insufficient_evidence')
         self.assertEqual(result.cleared,())
-        self.assertIn('shipping_delivery',result.unresolved_parts)
 
     def test_clear_authorized_knowledge_context_remains_available_with_uncertain_part_explicit(self):
         # Access-checked facts can remain context without pretending an uncertain match is resolved.
@@ -1456,7 +1150,7 @@ class EvidenceTests(unittest.TestCase):
             return relevance_answers(candidates,*(('ambiguous',(),()) if candidates[0].source_kind=='owned_history' else (
                 'clear',tuple(row.excerpt_id for row in candidates),())))
         self.models.relevance=relevance
-        self.assertEqual(self.prepare(history_needed=True).kind,'clarification_needed')
+        self.assertEqual(self.recall().kind,'clarification_needed')
 
     def test_expired_request_and_call_budget_cannot_start_more_models(self):
         self.clock[0]=191
@@ -1472,7 +1166,7 @@ class EvidenceTests(unittest.TestCase):
         self.storage.history_rows=terminal
         self.storage.header=lambda conversation_id,**_:header_result()
         self.storage.events=lambda conversation_id,**_:event_result(pending,terminal)
-        result=self.prepare(history_needed=True)
+        result=self.recall()
         self.assertEqual(result.kind,'ready')
         history=[c for c in result.cleared if c.source_kind=='owned_history']
         self.assertEqual(len(history),1)
@@ -1494,7 +1188,7 @@ class EvidenceTests(unittest.TestCase):
                 self.storage.events=lambda *args,**kwargs:event_result(pending,terminal)
                 self.storage.result={'ids':[[]],'documents':[[]],'metadatas':[[]]}
                 self.models.verdict=verdict
-                result=self.prepare(history_needed=True)
+                result=self.recall()
                 self.assertEqual(result.kind,expected)
                 self.assertIn(('review',1),self.models.calls)
                 if expected=='ready':
@@ -1509,7 +1203,7 @@ class EvidenceTests(unittest.TestCase):
             return relevance_answers(candidates,*(('insufficient',(),()) if candidates[0].source_kind=='knowledge' else (
                 'clear',tuple(row.excerpt_id for row in candidates),())))
         self.models.relevance=relevance
-        result=self.prepare(history_needed=True)
+        result=self.recall()
         self.assertEqual(result.kind,'ready')
         self.assertEqual([row.source_kind for row in result.cleared],['owned_history'])
 
@@ -1530,7 +1224,7 @@ class EvidenceTests(unittest.TestCase):
                 return relevance_answers(candidates,*('ambiguous',tuple(row.excerpt_id for row in candidates),()))
             return relevance_answers(candidates,*('clear',tuple(row.excerpt_id for row in candidates),()))
         self.models.relevance=relevance
-        self.assertEqual(self.prepare(history_needed=True).kind,'clarification_needed')
+        self.assertEqual(self.recall().kind,'clarification_needed')
         self.assertEqual(observed,[2])
 
     def test_current_pending_cannot_hide_cap_plus_one_history_overflow(self):
@@ -1542,7 +1236,7 @@ class EvidenceTests(unittest.TestCase):
             return event_result(*pairs,{'ids':[pending.message_id],'documents':[pending.text],
                 'metadatas':[pending.model_dump(mode='json',exclude={'text'})]})
         self.storage.events=events
-        self.assertEqual(self.prepare(history_needed=True).kind,'technical_failure')
+        self.assertEqual(self.recall().kind,'technical_failure')
 
     def test_five_process_model_slots_remain_held_until_underlying_calls_complete(self):
         from concurrent.futures import ThreadPoolExecutor
@@ -1596,9 +1290,11 @@ class EvidenceTests(unittest.TestCase):
             self.storage.history_rows=terminal
             self.storage.header=lambda conversation_id,**_:header_result()
             self.storage.events=lambda conversation_id,**_:event_result(pending)
-            result=self.prepare(history_needed=True)
+            self.prepare()
+            before=len(self.models.calls)  # The owner's history request starts here.
+            result=self.service.supplementary(target=self.request.question)
             self.assertEqual(result.kind,'technical_failure')
-            self.assertFalse(any(isinstance(c,tuple) and c[0]=='review' for c in self.models.calls))
+            self.assertFalse(any(isinstance(c,tuple) and c[0]=='review' for c in self.models.calls[before:]))
 
     def test_supplementary_search_has_one_continuation_even_without_initial_history(self):
         self.assertEqual(self.prepare().kind,'ready')
@@ -1627,7 +1323,7 @@ class EvidenceTests(unittest.TestCase):
         self.storage.header=lambda conversation_id,**_:foreign
         events=[]
         self.storage.events=lambda *args,**kwargs:events.append('foreign_read')
-        self.assertEqual(self.prepare(history_needed=True).kind,'technical_failure')
+        self.assertEqual(self.recall().kind,'technical_failure')
         self.assertEqual(events,[])
 
     def test_independent_clean_part_survives_another_parts_uncertainty(self):
@@ -1674,10 +1370,11 @@ class EvidenceTests(unittest.TestCase):
         original=self.models.review
         def review(candidates,*,timeout):
             result=original(candidates,timeout=timeout)
-            self.tracking.exclude_conversation(other)
+            if any(row.source_kind=='owned_history' for row in candidates):
+                self.tracking.exclude_conversation(other)  # The hold arrives while history is reviewed.
             return result
         self.models.review=review
-        self.assertEqual(self.prepare(history_needed=True).kind,'technical_failure')
+        self.assertEqual(self.recall().kind,'technical_failure')
         self.assertEqual(reads,['header'])
         # A fresh request preserves the known exclusion and must not read this header again.
         self.service=self.e.EvidenceService(storage=self.storage,catalog=self.service.catalog,
@@ -1685,7 +1382,7 @@ class EvidenceTests(unittest.TestCase):
             profile=self.profile,transcript=CompleteTranscript((),(),0,True),
             request_id=str(UUID(int=1000)),created_at='2026-11-12T10:00:00Z',budget=self.e.ModelBudget())
         reads.clear()
-        self.assertEqual(self.prepare(history_needed=True).kind,'technical_failure')
+        self.assertEqual(self.recall().kind,'technical_failure')
         self.assertEqual(reads,[])
 
     def test_uncertainty_is_not_dismissed_because_another_excerpt_is_clean(self):
@@ -1701,91 +1398,6 @@ class EvidenceTests(unittest.TestCase):
 
 class EvidenceWorkflowIntegrationTests(unittest.TestCase):
     setUp = EvidenceTests.setUp
-    def test_historical_route_replaces_permitted_and_restricted_guesses_after_review(self):
-        # Exercise the real graph and native requests; only external model/storage responses are controlled.
-        import json
-        import httpx2
-        from typesafe_sdk import TypeSafeClient,RetryPolicy
-        from tests.test_incoming import judgment_answers
-        from shopunow.incoming import HISTORY_ROUTE_FIELDS
-        from shopunow.model_clients import EvidenceModels as NativeEvidenceModels
-        from shopunow.workflow import run_incoming
-        for initial_topic,final_topics,current_shipping,expected in (
-                ('billing_payments',('shipping_delivery',),False,'ready'),
-                ('hr',('shipping_delivery',),False,'ready'),
-                ('shipping_delivery',('hr',),False,'refusal'),
-                ('hr',('hr',),False,'refusal'),
-                ('hr',('hr','shipping_delivery'),True,'ready')):
-            with self.subTest(initial_topic=initial_topic,final_topics=final_topics):
-                self.setUp()
-                self.service.topic_trigger=.5
-                self.request=QuestionRequest(user_id=USER_ID,conversation_id=CONVERSATION_ID,
-                    question='Recap our earlier HR discussion and, separately, explain parcel tracking.' if current_shipping
-                    else 'Recap our earlier HR discussion.' if final_topics==('hr',)
-                    else 'What details did we record in that earlier conversation?')
-                self.service.request=self.request
-                pending,terminal=transcript_pair()
-                self.storage.history_rows=terminal
-                self.storage.header=lambda *args,**kwargs:header_result()
-                self.storage.events=lambda *args,**kwargs:event_result(pending,terminal)
-                incoming=judgment_answers()
-                incoming['history_needed']['noul']=1.0
-                incoming['topic_'+initial_topic]['noul']=.9
-                final=judgment_answers()
-                for topic in final_topics:
-                    final['topic_'+topic]['noul']=.9
-                native_requests=[]
-                routing_boundaries=[]
-                def respond(request):
-                    body=json.loads(request.content)
-                    native_requests.append(body)
-                    if len(native_requests)==1:
-                        answers=incoming
-                    else:
-                        # Capture ordering here; assert outside production's exception handling.
-                        routing_boundaries.append((list(self.storage.calls),list(self.models.calls)))
-                        answers={key:final[key] for key in HISTORY_ROUTE_FIELDS}
-                    return httpx2.Response(200,json={'model':'offline-jev','usage':{},'answers':answers})
-                def relevance(question,candidates,*,timeout):
-                    return relevance_answers(candidates,*(('clear',tuple(row.excerpt_id for row in candidates),()) if (
-                        candidates[0].source_kind=='owned_history' or current_shipping) else ('insufficient',(),())))
-                self.models.relevance=relevance  # Only the explicit current part requests company sources.
-                observed=[]
-                with TypeSafeClient(api_key='offline-test',retry=RetryPolicy(max_retries=0),
-                                    transport=httpx2.MockTransport(respond)) as client:
-                    self.models.history_route=NativeEvidenceModels(jev=client,reviewer=None,
-                        embedding=None,jev_model='offline-jev').history_route
-                    run_incoming(request=self.request,profile=self.profile,transcript=self.service.transcript,
-                        attempt=self.attempt,tracking=self.tracking,storage=self.storage,request_id=REQUEST_ID,
-                        jev_client=client,reviewer_client=None,jev_model='offline-jev',security_trigger=.7,
-                        topic_trigger=.5,model_budget=self.service.budget,
-                        on_cleared=lambda decision:observed.append(self.service.prepare(decision)))
-                self.assertEqual(len(observed),1)
-                result=observed[0]
-                self.assertEqual(result.kind,expected)
-                self.assertEqual(result.destinations,('shipping_delivery',) if expected=='ready' else ())
-                self.assertEqual(result.refused_parts,('hr',) if 'hr' in final_topics else ())
-                self.assertEqual([row.source_kind for row in result.cleared],
-                                 ['knowledge'] if current_shipping else ['owned_history'] if expected=='ready' else [])
-                self.assertEqual(len(native_requests),2)
-                routing_storage,routing_models=routing_boundaries[0]
-                self.assertEqual(routing_storage[:2],['pending_write','pending_read'])
-                self.assertIn(('review',1),routing_models)
-                self.assertFalse(any(isinstance(call,tuple) and call[0]=='knowledge'
-                                     for call in routing_storage))
-                self.assertEqual(set(native_requests[1]['questions']),set(HISTORY_ROUTE_FIELDS))
-                self.assertEqual(native_requests[1]['state']['question'],self.request.question)
-                self.assertIn('Stored answer 1',native_requests[1]['state']['cleared_history'][0]['text'])
-                self.assertEqual(self.storage.calls.count('pending_write'),1)
-                self.assertEqual(self.service.searches,1)
-                self.assertEqual([call for call in self.models.calls if isinstance(call,tuple)
-                                  and call[0]=='review'],[('review',1),('review',1)] if current_shipping else [('review',1)])
-                knowledge=[call for call in self.storage.calls if isinstance(call,tuple) and call[0]=='knowledge']
-                self.assertEqual(len(knowledge),1 if current_shipping else 0)
-                if current_shipping:
-                    self.assertEqual(result.cleared[0].source_record_id,'SU-SD-001')
-                    self.assertEqual(result.unresolved_parts,('hr',))
-
     def test_actual_incoming_graph_drives_clear_evidence_without_served_answer(self):
         from tests.test_incoming import judgment_answers
         from shopunow.workflow import run_incoming

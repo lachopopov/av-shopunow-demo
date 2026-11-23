@@ -62,7 +62,7 @@ CHOICE_LABELS = {
 }
 NOUL_FIELDS = (
     'company_wide_topic', 'topic_hr', 'topic_it_support', 'topic_facilities_admin',
-    'topic_billing_payments', 'topic_shipping_delivery', 'history_needed',
+    'topic_billing_payments', 'topic_shipping_delivery',
     'prompt_injection', 'sql_injection', 'profile_override_attempt', 'access_concern',
 )
 # One typed access signal: code alone decides whether recalled history may be used.

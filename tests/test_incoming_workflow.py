@@ -64,7 +64,8 @@ class IncomingWorkflowTests(unittest.TestCase):
         answers = judgment_answers()
         answers['prompt_injection']['noul'] = 1.0
         decision = self.run_gate(answers=answers, review={'verdict':'clear', 'attack_types':[]})
-        self.assertEqual(decision.kind, 'handoff')  # No matched topic in the fixture.
+        # No matched topic: an information question goes to central support (owner 2026-11-23, Q-c).
+        self.assertEqual((decision.kind, decision.destinations), ('continue', ('central_support',)))
         self.assertEqual(self.calls, ['judge', 'review'])
 
     def test_confirmed_attack_has_no_route_or_offer_decision(self):
@@ -121,39 +122,23 @@ class IncomingWorkflowTests(unittest.TestCase):
         self.assertEqual(getattr(decision, 'intent', None), 'mixed')
         self.assertIs(getattr(decision, 'requires_action_handoff', None), True)
 
-    def test_department_free_recall_defers_dispatch_without_bypassing_service_or_access(self):
-        # Historical subject guesses wait for history; safety and service gates still precede it.
-        for intent,sentiment,history,restricted,expected in (
-                ('information','neutral',True,False,'history_resolution'),
-                ('information','negative',True,False,'handoff'),
-                ('individual_case_or_action','neutral',True,False,'handoff'),
-                ('mixed','neutral',True,False,'handoff'),
-                ('unclear_or_other','neutral',True,False,'clarification'),
-                ('information','neutral',False,False,'handoff'),
-                ('information','neutral',True,True,'history_resolution'),
-                ('information','neutral',False,True,'refusal')):
-            with self.subTest(intent=intent,sentiment=sentiment,history=history,restricted=restricted):
+    def test_department_free_question_keeps_service_and_access_gates_before_central_support(self):
+        # Owner 2026-11-23 (Q-c): information naming no department goes to central support, after the
+        # negative-sentiment, action, clarification and customer-refusal gates.
+        for intent,sentiment,restricted,expected,destinations in (
+                ('information','neutral',False,'continue',('central_support',)),
+                ('information','negative',False,'handoff',()),
+                ('individual_case_or_action','neutral',False,'handoff',()),
+                ('mixed','neutral',False,'handoff',()),
+                ('unclear_or_other','neutral',False,'clarification',()),
+                ('information','neutral',True,'refusal',())):
+            with self.subTest(intent=intent,sentiment=sentiment,restricted=restricted):
                 answers=judgment_answers()
                 for key,label in (('intent',intent),('sentiment',sentiment)):
                     answers[key]['choice']=label
                     answers[key]['probabilities']={name:float(name==label) for name in answers[key]['probabilities']}
-                answers['history_needed']['noul']=float(history)
                 answers['topic_hr']['noul']=float(restricted)
                 decision=self.run_gate(answers=answers)
-                self.assertEqual(decision.kind,expected)
-                self.assertEqual(decision.destinations,())
-                if expected=='history_resolution':
-                    self.assertEqual(decision.refused_departments,())
-        # A permitted or company-wide guess is provisional too, not merely a restricted one.
-        for topic in ('topic_shipping_delivery','company_wide_topic'):
-            with self.subTest(provisional_topic=topic):
-                answers=judgment_answers()
-                answers['history_needed']['noul']=1.0
-                answers[topic]['noul']=.9
-                decision=self.run_gate(answers=answers)
-                self.assertEqual(decision.kind,'history_resolution')
-                self.assertEqual(decision.destinations,())
-                self.assertEqual(decision.refused_departments,())
-
+                self.assertEqual((decision.kind,decision.destinations),(expected,destinations))
 
 # Flow: controlled judgment -> real graph/security/access -> internal continuation decision.

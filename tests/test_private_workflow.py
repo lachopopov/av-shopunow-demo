@@ -54,7 +54,7 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.fixture=PrivateWorkflowFixture(self.http.tracking,source_ids=sources)
         self.addCleanup(self.fixture.close)
         self.fixture.answers['topic_shipping_delivery']['noul']=0.
-        self.fixture.answers['history_needed']['noul']=1.
+        self.request_context_once('The earlier delivery case')  # Owner 2026-11-23: the owner asks.
         for topic in topics:
             self.fixture.answers['topic_'+topic]['noul']=1.
         self.fixture.history_topics=topics
@@ -123,7 +123,9 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         fixture.restricted_history=fixture.choice('restricted',('restricted','not_restricted','uncertain'))
         fixture.descriptor_matches={'source_SU_HR_010':'irrelevant'}
         await self.post()
-        self.assertEqual(fixture.producer_calls,[])
+        # Owner 2026-11-23: the evidence-less owner may only ask; the denied history never resumes it.
+        self.assertEqual(len(fixture.producer_calls),1)
+        self.assertEqual(fixture.producer_calls[0]['evidence'],[])
         self.assertIsNone(fixture.boundaries[0].draft)
         self.assertIn(('history','refusal'),[(row.part,row.kind) for row in fixture.boundaries[0].dispositions])
 
@@ -141,7 +143,6 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_weak_unrelated_route_score_does_not_block_targeted_continuation(self):
         await self.employee()
         self.recalled_employee_fixture(sources=('SU-IT-004',),topics=('it_support',))
-        self.fixture.answers['history_needed']['noul']=0.
         self.fixture.history_topic_score=.75
         def produce(payload,reply):
             if len(self.fixture.producer_calls)==1:
@@ -165,14 +166,16 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         for payload in self.fixture.producer_calls:
             self.assertEqual({row['source_kind'] for row in payload['evidence']},{'knowledge'})
 
-    async def test_producer_is_told_independence_and_the_actual_historical_outcome(self):
-        self.fixture.answers['history_needed']['noul']=1.
+    async def test_ambiguous_earlier_case_makes_the_owner_part_a_clarification(self):
+        # Owner 2026-11-23 (L6 accepted): the earlier reference fits several cases, so ask which one.
+        self.request_context_once('The earlier delivery case')
         self.fixture.history()
         self.fixture.history_kind='ambiguous'
         await self.post()
-        payload=self.fixture.producer_calls[0]
-        self.assertEqual(payload['dependency'],'independent')
-        self.assertIn({'part':'history','outcome':'clarification_needed'},payload['part_outcomes'])
+        self.assertEqual(len(self.fixture.producer_calls),1)  # No resumed answer from an unresolved reference.
+        self.assertEqual(self.fixture.producer_calls[0]['dependency'],'independent')
+        self.assertIn(('shipping_delivery','clarification_needed'),
+                      [(row.part,row.kind) for row in self.fixture.boundaries[0].dispositions])
 
     async def test_empty_search_resumes_independent_help_once_and_keeps_the_missing_target(self):
         target='The preferred period in my earlier planning note'
@@ -212,25 +215,6 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.fixture.producer_calls),2)
         self.assertEqual(self.fixture.boundaries[0].kind,'draft_ready')
 
-    async def test_history_withheld_once_is_never_released_by_a_later_search(self):
-        labels=('restricted','not_restricted','uncertain')
-        for first in ('restricted','uncertain'):
-            with self.subTest(first=first):
-                await self.employee()
-                fixture=self.recalled_employee_fixture()
-                fixture.descriptor_matches={'source_SU_HR_010':'irrelevant'}
-                fixture.restricted_sequence=[fixture.choice(first,labels)]
-                def produce(payload,reply):
-                    if len(fixture.producer_calls)==1:
-                        reply.update(kind='context_needed',text=None,cited_ids=[],support_assertion=False,
-                                     target='The earlier allocation discussion')
-                    return reply
-                fixture.producer_hook=produce
-                await self.post()
-                for payload in fixture.producer_calls:
-                    self.assertEqual({row['source_kind'] for row in payload['evidence']},{'knowledge'})
-                self.assertEqual(fixture.boundaries[0].kind,'draft_ready')
-
     async def test_resumed_producer_may_name_the_missing_item_without_losing_its_answer(self):
         target='The preferred period in my earlier planning note'
         for named in ('history',):  # Owner decision 2026-11-19: only code-accepted labels are expressible.
@@ -252,16 +236,15 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 outcomes=[row.kind for row in result.dispositions if row.part=='shipping_delivery']
                 self.assertEqual(outcomes,['supported_answer'])
 
-    async def test_failed_adjudication_of_history_never_looks_like_a_complete_draft(self):
-        self.fixture.answers['history_needed']['noul']=1.
+    async def test_uncertain_history_never_looks_like_a_complete_draft(self):
+        # Owner 2026-11-23 (L5 accepted): uncertain history excerpts are not adjudicated again; they stay unused.
+        self.request_context_once('The earlier delivery case')
         self.fixture.history()
         self.fixture.history_match='uncertain'
-        self.fixture.candidate_reply=lambda payload:{'question':'Another request',
-            'outcome':{'status':'resolved','relevant_excerpt_ids':[]}}
         await self.post()
         result=self.fixture.boundaries[0]
         self.assertIn('history',result.unresolved_parts)
-        self.assertIn(('history','technical_failure'),[(row.part,row.kind) for row in result.dispositions])
+        self.assertIn(('history','insufficient_evidence'),[(row.part,row.kind) for row in result.dispositions])
         for payload in self.fixture.producer_calls:
             self.assertEqual({row['source_kind'] for row in payload['evidence']},{'knowledge'})
 
@@ -296,121 +279,14 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('central_support',[row.part for row in result.dispositions])
 
     def request_context_once(self,target):
-        # The first producer asks for earlier context; its resumed call answers normally.
+        # The history owner's first call asks for earlier context; its resumed call answers normally.
+        asked=set()
         def produce(payload,reply):
-            if len(self.fixture.producer_calls)==1:
+            if payload['history_owner'] and payload['part'] not in asked:
+                asked.add(payload['part'])
                 reply.update(kind='context_needed',text=None,cited_ids=[],support_assertion=False,target=target)
             return reply
         self.fixture.producer_hook=produce
-
-    async def test_settled_history_refusal_survives_routing_adjudication(self):
-        self.fixture.answers['topic_shipping_delivery']['noul']=0.
-        self.fixture.answers['history_needed']['noul']=1.
-        self.fixture.history()
-        self.fixture.history_topics=('hr','shipping_delivery')
-        self.fixture.history_company_score=.6  # One unrelated weak field triggers adjudication.
-        await self.post()
-        result=self.fixture.boundaries[0]
-        outcomes=[(row.part,row.kind) for row in result.dispositions]
-        self.assertIn(('hr','refusal'),outcomes)
-        self.assertIn(('history','refusal'),outcomes)
-        for payload in self.fixture.producer_calls:
-            self.assertNotIn('owned_history',[row['source_kind'] for row in payload['evidence']])
-        routing=[json.loads(body['input']) for stage,body in self.fixture.calls if stage=='RoutingResolution']
-        self.assertEqual([(row['history'],row['history_status']) for row in routing],[([],'withheld')])
-
-    async def test_rejected_history_candidate_is_reported_as_unresolved(self):
-        replies=(({'status':'ambiguous'},'clarification_needed'),({'status':'insufficient'},'insufficient_evidence'),
-                 ({'status':'resolved','relevant_excerpt_ids':[]},'insufficient_evidence'))
-        for outcome,wanted in replies:
-            with self.subTest(outcome=outcome['status'],wanted=wanted):
-                await self.reset_http()
-                self.fixture=PrivateWorkflowFixture(self.http.tracking)
-                self.addCleanup(self.fixture.close)
-                self.fixture.answers['history_needed']['noul']=1.
-                self.fixture.history()
-                self.fixture.history_match='uncertain'
-                self.fixture.candidate_reply=lambda payload:{'question':payload['question'],'outcome':outcome}
-                await self.post()
-                result=self.fixture.boundaries[0]
-                self.assertIn('history',result.unresolved_parts)
-                self.assertIn(('history',wanted),[(row.part,row.kind) for row in result.dispositions])
-
-    async def test_settled_dependent_refusal_survives_an_unrelated_weak_route_field(self):
-        labels=('independent','dependent','unclear')
-        weak={'type':'choice','choice':'independent','confidence':.4,
-              'probabilities':{'independent':.6,'dependent':.3,'unclear':.1}}
-        for name,incoming,adjudicated in (('adjudicator independent',None,'independent'),
-                                          ('adjudicator dependent',None,'dependent'),
-                                          ('weak incoming dependency',weak,'independent')):
-            with self.subTest(name=name):
-                await self.reset_http()
-                self.fixture=PrivateWorkflowFixture(self.http.tracking)
-                self.addCleanup(self.fixture.close)
-                fixture=self.fixture
-                fixture.answers['topic_shipping_delivery']['noul']=0.
-                fixture.answers['history_needed']['noul']=1.
-                if incoming is not None:
-                    fixture.answers['department_dependency']=incoming
-                fixture.history()
-                fixture.history_topics=('hr','shipping_delivery')
-                fixture.history_company_score=.6
-                fixture.dependency=adjudicated
-                def settle_route(stage):
-                    # Incoming has been judged; the history route then confidently says dependent.
-                    if stage=='relevance':
-                        fixture.answers['department_dependency']=fixture.choice('dependent',labels)
-                fixture.model_hook=settle_route
-                await self.post()
-                self.assertEqual(fixture.boundaries[0].kind,'refusal')
-                self.assertEqual(fixture.producer_calls,[])
-
-    async def test_settled_dependent_refusal_does_not_depend_on_the_routing_status(self):
-        labels=('independent','dependent','unclear')
-        for status in ('resolved','ambiguous','insufficient'):
-            with self.subTest(status=status):
-                await self.reset_http()
-                self.fixture=PrivateWorkflowFixture(self.http.tracking)
-                self.addCleanup(self.fixture.close)
-                fixture=self.fixture
-                fixture.answers['topic_shipping_delivery']['noul']=0.
-                fixture.answers['history_needed']['noul']=1.
-                fixture.history()
-                fixture.history_topics=('hr','shipping_delivery')
-                fixture.history_company_score=.6
-                fixture.routing_status=status
-                def settle_route(stage):
-                    if stage=='relevance':
-                        fixture.answers['department_dependency']=fixture.choice('dependent',labels)
-                fixture.model_hook=settle_route
-                await self.post()
-                result=fixture.boundaries[0]
-                self.assertEqual(result.kind,'refusal')
-                self.assertEqual(fixture.producer_calls,[])
-                self.assertIn(('hr','refusal'),[(row.part,row.kind) for row in result.dispositions])
-                self.assertIn(('history','refusal'),[(row.part,row.kind) for row in result.dispositions])
-
-    async def test_history_judged_malicious_stays_excluded_from_a_later_search(self):
-        self.fixture.answers['history_needed']['noul']=1.
-        self.fixture.history()
-        self.fixture.history_verdict='malicious'
-        def produce(payload,reply):
-            if len(self.fixture.producer_calls)==1:
-                self.fixture.history_verdict='clean'  # A later inconsistent review cannot reverse the exclusion.
-                reply.update(kind='context_needed',text=None,cited_ids=[],support_assertion=False,
-                             target='The earlier parcel correction')
-            return reply
-        self.fixture.producer_hook=produce
-        original=EvidenceService.supplementary
-        def with_review_capacity(service,**kwargs):
-            service._reviewed=1  # Keep one approved batch free so only the exclusion can stop this row.
-            return original(service,**kwargs)
-        with mock.patch.object(EvidenceService,'supplementary',with_review_capacity):
-            await self.post()
-        self.assertEqual(len(self.fixture.producer_calls),2)
-        for payload in self.fixture.producer_calls:
-            self.assertEqual({row['source_kind'] for row in payload['evidence']},{'knowledge'})
-        self.assertIn(('history','unavailable'),[(row.part,row.kind) for row in self.fixture.boundaries[0].dispositions])
 
     async def test_customer_continuation_ignores_only_unrelated_weak_route_fields(self):
         for name,company,scores,released in (('unrelated weak company score',.6,{},True),
@@ -599,7 +475,7 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_action_cleared_as_information_still_uses_the_history_search(self):
         fixture=await self.fresh_fixture()
         fixture.answers['intent']=self.action_label(.5)
-        fixture.answers['history_needed']['noul']=1.
+        self.request_context_once('The earlier delivery case')  # Owner 2026-11-23: the owner asks.
         fixture.history()
         await self.post()
         self.assertTrue(any(isinstance(row,tuple) and row[0]=='history' for row in fixture.storage.calls))
@@ -607,7 +483,7 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                                        for row in payload['evidence']])
         self.assertNotIn('action',[row.part for row in fixture.boundaries[0].dispositions])
 
-    async def test_unclear_request_settled_as_information_with_no_route_starts_no_work(self):
+    async def test_unclear_request_settled_as_information_with_no_route_goes_to_central_support(self):
         fixture=await self.fresh_fixture()
         fixture.answers['intent']={'type':'choice','choice':'unclear_or_other','confidence':.4,'probabilities':{
             'unclear_or_other':.5,'information':.3,'individual_case_or_action':.1,'mixed':.1}}
@@ -615,16 +491,16 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         fixture.destinations=()  # The adjudicator says information but names no department.
         await self.post()
         self.assertTrue(any(stage=='RoutingResolution' for stage,_ in fixture.calls))
-        self.assertEqual(fixture.boundaries[0].kind,'insufficient_evidence')
-        self.assertEqual(fixture.producer_calls,[])
-        self.assertFalse(any(isinstance(row,tuple) and row[0]=='knowledge' for row in fixture.storage.calls))
+        # Owner 2026-11-23 (Q-c): information naming no department goes to central support, the history owner.
+        self.assertEqual([row['part'] for row in fixture.producer_calls],['central_support'])
+        self.assertTrue(fixture.producer_calls[0]['history_owner'])
+        self.assertEqual(fixture.boundaries[0].kind,'insufficient_evidence')  # It found nothing to answer from.
 
     async def test_action_label_is_kept_when_the_information_reply_names_no_route(self):
-        for history_needed in (1.,0.):
-            with self.subTest(history_needed=history_needed):
+        for _ in (1,):  # Owner 2026-11-23: no separate history-routing variant remains.
+            with self.subTest():
                 fixture=await self.fresh_fixture()
                 fixture.answers['intent']=self.action_label(.55)
-                fixture.answers['history_needed']['noul']=history_needed
                 fixture.answers['topic_shipping_delivery']['noul']=.35  # Only a weak hint exists.
                 fixture.destinations=()  # The adjudicator says information but names no department.
                 fixture.history()
@@ -644,7 +520,6 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(judgment=name):
                 await self.employee('facilities_admin')
                 fixture=self.recalled_employee_fixture(sources=('SU-HR-010','SU-IT-004'),topics=('it_support',))
-                fixture.answers['history_needed']['noul']=0.
                 fixture.restricted_history=answer
                 self.request_context_once('The earlier allocation discussion')
                 await self.post()
@@ -653,20 +528,6 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 kinds={row['source_kind'] for payload in fixture.producer_calls for row in payload['evidence']}
                 self.assertEqual(kinds,{'knowledge'})
                 self.assertIn(('history',outcome),[(row.part,row.kind) for row in fixture.boundaries[0].dispositions])
-
-    async def test_employee_denial_on_the_first_search_survives_the_follow_up_search(self):
-        labels=('restricted','not_restricted','uncertain')
-        await self.employee()
-        fixture=self.recalled_employee_fixture(sources=('SU-HR-010','SU-IT-004'),topics=('it_support',))
-        # A mixed request searches history during ordinary preparation, not the pre-dispatch history phase.
-        fixture.answers['intent']=fixture.choice('mixed',('information','individual_case_or_action','mixed','unclear_or_other'))
-        fixture.descriptor_matches={'source_SU_HR_010':'irrelevant'}
-        fixture.restricted_sequence=[fixture.choice('restricted',labels)]  # Later route calls would allow it.
-        self.request_context_once('The earlier allocation discussion')
-        await self.post()
-        self.assertEqual(sum(stage=='history_route' for stage,_ in fixture.calls),1)
-        kinds={row['source_kind'] for payload in fixture.producer_calls for row in payload['evidence']}
-        self.assertEqual(kinds,{'knowledge'})
 
     async def test_central_support_resume_keeps_its_earlier_unresolved_status(self):
         self.fixture=PrivateWorkflowFixture(self.http.tracking,source_ids=('SU-SD-001','SU-CW-003'))
@@ -733,7 +594,6 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_confident_unrestricted_employee_history_on_another_topic_is_released(self):
         await self.employee()
         fixture=self.recalled_employee_fixture(sources=('SU-IT-004',),topics=('it_support',))
-        fixture.answers['history_needed']['noul']=0.  # The history is recalled by the producer's continuation.
         fixture.history_topics=('billing_payments',)  # A general subject outside this request's current route.
         self.request_context_once('The earlier parcel correction')
         await self.post()
@@ -783,9 +643,8 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         return search(schema['properties']['unresolved_parts'])
 
     async def test_each_producer_reply_format_allows_only_the_parts_code_accepts(self):
-        fixture=await self.fresh_fixture(source_ids=('SU-BP-001','SU-SD-001'))
-        fixture.answers['topic_billing_payments']['noul']=1.
-        fixture.destinations=('billing_payments','shipping_delivery')
+        # One department: its specialist is the history owner (owner 2026-11-23), so its request is searched.
+        fixture=await self.fresh_fixture(source_ids=('SU-SD-001',))
         def produce(payload,reply):
             asked=sum(row['part']=='shipping_delivery' for row in fixture.producer_calls)
             if payload['part']=='shipping_delivery' and asked==1:
@@ -953,8 +812,11 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         # R4: wording only; live compliance is V4 evidence.
         self.assertIn('own_notes lists topics inside your own part that must not be answered',body['instructions'])
         self.assertIn('a partial one (own part in unresolved_parts) may give a short reason',body['instructions'])
-        self.assertIn('If something missing from your own share is a specific earlier case or fact that a search '
-                      'could supply and missing_context is not set, return context_needed',body['instructions'])
+        # Owner 2026-11-23 (plan §5.2): only the history owner may request an earlier conversation.
+        self.assertIn('When history_owner is false, never return context_needed',body['instructions'])
+        self.assertIn('Wording such as remind me, again, earlier or my does not alone require history',
+                      body['instructions'])
+        self.assertTrue(all('history_owner' in payload for payload in fixture.producer_calls))
 
     async def test_partial_specialist_part_stays_unresolved_through_synthesis(self):
         # R3 review finding 3: one department answers partly, the other fully; the gap survives synthesis.
@@ -972,24 +834,6 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(central),1)
         self.assertIn('billing_payments',central[0]['unresolved_parts'])
         self.assertIn('billing_payments',result.draft.unresolved_parts)
-
-    async def test_resumed_specialist_keeps_its_other_parts(self):
-        # R3 review finding 4: a producer resumed after the history search keeps its own-share boundary.
-        fixture=await self.fresh_fixture(source_ids=('SU-BP-001','SU-SD-001'))
-        fixture.answers['topic_billing_payments']['noul']=1.
-        fixture.destinations=('billing_payments','shipping_delivery')
-        fixture.history()
-        def produce(payload,reply):
-            if payload['part']=='shipping_delivery' and sum(row['part']=='shipping_delivery'
-                                                            for row in fixture.producer_calls)==1:
-                reply.update(kind='context_needed',text=None,cited_ids=[],support_assertion=False,
-                             target='The earlier parcel correction')
-            return reply
-        fixture.producer_hook=produce
-        await self.post()
-        shipping=[row for row in fixture.producer_calls if row['part']=='shipping_delivery']
-        self.assertEqual(len(shipping),2)
-        self.assertEqual([row['other_parts'] for row in shipping],[['billing_payments']]*2)
 
     async def test_specialist_partial_answer_keeps_its_own_part_unresolved_in_the_draft(self):
         # A department may answer the share its evidence supports; the rest stays visibly unresolved.
@@ -1022,8 +866,8 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fixture.boundaries[0].kind,'handoff_needed')
         self.assertEqual(fixture.producer_calls,[])
 
-    async def test_gap_only_synthesis_cannot_start_a_history_search(self):
-        # Owner decision 2026-11-19: synthesis added only because another part failed must not search history.
+    async def test_several_departments_central_support_owns_the_history_search(self):
+        # Owner decision 2026-11-23 (H1/H2): with several departments central support is the history owner.
         fixture=await self.fresh_fixture(source_ids=('SU-BP-001','SU-SD-001'))
         fixture.answers['topic_billing_payments']['noul']=1.
         fixture.destinations=('billing_payments','shipping_delivery')
@@ -1042,16 +886,16 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
             return original(service,**kwargs)
         with mock.patch.object(EvidenceService,'supplementary',tracked):
             await self.post()
-        result=fixture.boundaries[0]
-        self.assertEqual(searches,[])
-        self.assertNotIn('history',result.unresolved_parts)
+        self.assertEqual(searches,['The earlier parcel correction'])
 
     async def test_single_part_with_missing_history_is_still_passed_through(self):
         fixture=await self.fresh_fixture(source_ids=('SU-SD-006',))
-        fixture.answers['history_needed']['noul']=1.
+        self.request_context_once('The earlier delivery case')  # The search finds no history.
         await self.post()
         result=fixture.boundaries[0]
-        self.assertEqual([row['part'] for row in fixture.producer_calls],['shipping_delivery'])
+        # The owner asks once, then answers what its Knowledge supports and names the missing history.
+        self.assertEqual([row['part'] for row in fixture.producer_calls],['shipping_delivery']*2)
+        self.assertEqual(fixture.producer_calls[1]['missing_context'],'The earlier delivery case')
         self.assertEqual(result.draft.contributor_ids,('shipping_delivery',))
         self.assertIn('history',result.draft.unresolved_parts)
 
@@ -1155,7 +999,7 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_historical_limits_do_not_suppress_independently_supported_current_guidance(self):
         for variant,expected_kind,history_kind,produces in (
                 ('empty','draft_ready','unavailable',True),
-                ('ambiguous','draft_ready','clarification_needed',True),
+                ('ambiguous','clarification_needed','clarification_needed',False),  # L6 (owner 2026-11-23).
                 ('denied','draft_ready','refusal',True),
                 ('malicious','draft_ready','unavailable',True),
                 ('uncertain','security_fallback','security_fallback',False),
@@ -1168,7 +1012,7 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 await self.http.asyncSetUp()
                 self.fixture=PrivateWorkflowFixture(self.http.tracking,source_ids=('SU-SD-006',))
                 self.addCleanup(self.fixture.close)
-                self.fixture.answers['history_needed']['noul']=1.
+                self.request_context_once('The earlier delivery case')  # Owner 2026-11-23: the owner asks.
                 if variant!='empty':
                     self.fixture.history(foreign=variant=='foreign')
                 if variant=='incomplete':
@@ -1186,29 +1030,31 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 result=self.fixture.boundaries[0]
                 self.assertEqual(result.kind,expected_kind)
                 self.assertIn(('history',history_kind),[(row.part,row.kind) for row in result.dispositions])
-                self.assertEqual(bool(self.fixture.producer_calls),produces)
+                # The owner always asks first (owner 2026-11-23); only usable outcomes resume it into a draft.
+                self.assertEqual(result.draft is not None,produces)
                 for payload in self.fixture.producer_calls:
                     self.assertEqual({row['source_record_id'] for row in payload['evidence']},{'SU-SD-006'})
                     self.assertTrue(all(row['source_kind']=='knowledge' for row in payload['evidence']))
                     self.assertIn(self.fixture.catalog['SU-SD-006'].answer_facts[0],payload['evidence'][0]['text'])
+                    self.assertTrue(payload['history_owner'])
                 if produces:
                     self.assertIn('history',result.draft.unresolved_parts)
                 if variant in ('foreign','incomplete'):
-                    self.assertFalse(any(stage=='history_route' or stage=='ExcerptReview'
-                                         for stage,_ in self.fixture.calls))
+                    # Corrupt history never reaches access routing (Knowledge is reviewed earlier, as always).
+                    self.assertFalse(any(stage=='history_route' for stage,_ in self.fixture.calls))
 
     async def test_clear_owned_recap_and_current_guidance_both_reach_the_actual_producer(self):
         self.fixture=PrivateWorkflowFixture(self.http.tracking,source_ids=('SU-SD-006',))
         self.addCleanup(self.fixture.close)
-        self.fixture.answers['history_needed']['noul']=1.
+        self.request_context_once('The earlier delivery case')  # Owner 2026-11-23: the owner asks.
         recalled=self.fixture.history()
         await self.post()
         self.assertEqual(self.fixture.boundaries[0].kind,'draft_ready')
-        payload=self.fixture.producer_calls[0]
-        self.assertEqual([row['source_kind'] for row in payload['evidence']],['owned_history','knowledge'])
-        self.assertIn('Stored answer 1',payload['evidence'][0]['text'])
-        self.assertEqual(payload['evidence'][1]['source_record_id'],'SU-SD-006')
-        history=self.fixture.boundaries[0].contexts[0].evidence[0]
+        payload=self.fixture.producer_calls[-1]  # The owner's resumed call, after its own request.
+        self.assertEqual([row['source_kind'] for row in payload['evidence']],['knowledge','owned_history'])
+        self.assertIn('Stored answer 1',payload['evidence'][1]['text'])
+        self.assertEqual(payload['evidence'][0]['source_record_id'],'SU-SD-006')
+        history=next(row for row in self.fixture.boundaries[0].contexts[0].evidence if row.source_kind=='owned_history')
         self.assertEqual((history.owner_user_id,history.conversation_id),
                          (http_fixtures.VALID['user_id'],recalled))
         self.assertEqual(self.fixture.boundaries[0].draft.cited_ids,tuple(row['excerpt_id'] for row in payload['evidence']))
@@ -1220,16 +1066,17 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         prepared=self.fixture.evidence_results[0]
         self.assertTrue(prepared.resolution_candidates)
         self.assertEqual(prepared.cleared,())
-        self.assertEqual(self.fixture.producer_calls,[])
+        # The evidence-less owner may be asked whether it needs history; candidates never reach it.
+        self.assertTrue(all(payload['evidence']==[] for payload in self.fixture.producer_calls))
         self.assertIsNone(self.fixture.boundaries[0].draft)
 
     async def test_genuine_history_ambiguity_without_current_help_stays_clarification_without_generation(self):
-        self.fixture.answers['history_needed']['noul']=1.
+        self.request_context_once('The earlier delivery case')  # Owner 2026-11-23: the owner asks.
         self.fixture.history()
         self.fixture.history_kind='ambiguous'
         self.fixture.routing_status='ambiguous'
         await self.post()
-        self.assertEqual(self.fixture.producer_calls,[])
+        self.assertEqual(len(self.fixture.producer_calls),1)  # Only the owner's request; no answer is generated.
         self.assertEqual(len(self.fixture.boundaries),1)
         self.assertEqual(self.fixture.boundaries[0].kind,'clarification_needed')
         self.assertIsNone(self.fixture.boundaries[0].draft)
@@ -1327,15 +1174,14 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                                      [row['excerpt_id'] for row in self.fixture.producer_calls[1]['evidence']])
 
     async def test_http_disconnect_keeps_admitted_ownership_and_frozen_boundary_while_history_drains(self):
-        self.fixture=PrivateWorkflowFixture(self.http.tracking,source_ids=('SU-BP-001','SU-SD-001'))
+        # One department: its specialist is the history owner (owner 2026-11-23), so its request is searched.
+        self.fixture=PrivateWorkflowFixture(self.http.tracking,source_ids=('SU-SD-001',))
         self.addCleanup(self.fixture.close)
-        self.fixture.answers['topic_billing_payments']['noul']=1.
-        self.fixture.destinations=('billing_payments','shipping_delivery')
         started,release,observed=Event(),Event(),Event()
         self.http.release_events.append(release)
         def history(user_id,*,offset,timeout):
             self.http.now=160.
-            started.set()  # The earlier billing receipt is required before shipping's supplementary read.
+            started.set()  # The owner's supplementary read is still running at the cutoff.
             if not release.wait(8):
                 raise AssertionError('Late history read was not released')
             return {'ids':[],'documents':[],'metadatas':[]}
@@ -1353,11 +1199,9 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
             await self.http.thread_event(started)
             await self.http.thread_event(observed)
             snapshot=self.fixture.boundaries[0]
-            self.assertEqual(snapshot.draft.contributor_ids,('billing_payments','central_support'))  # Owner decision 2026-11-19: an unfinished other part sends the answer through synthesis.
+            self.assertIsNone(snapshot.draft)  # The cutoff freezes the boundary without the unfinished part.
             self.assertIn(('shipping_delivery','incomplete_at_cutoff'),
                           [(row.part,row.kind) for row in snapshot.dispositions])
-            # Owner decision 2026-11-19: the synthesis input is retained after the specialist input.
-            self.assertEqual([row.part for row in snapshot.contexts],['billing_payments','central_support'])
             self.assertFalse(state['handle'].lease.capacity_released)
             self.http.assert_key_busy()
             await self.http.assert_running_worker_owns_capacity()

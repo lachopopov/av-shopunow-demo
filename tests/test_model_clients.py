@@ -94,12 +94,8 @@ class IncomingModelTests(unittest.TestCase):
         self.assertIn('historical recap or current-status investigation', intent['instructions'])
         self.assertIn('What happened with that request?',
                       intent['criteria']['unclear_or_other']['examples'])
-        # Recall necessity needs both meanings on the actual wire, not a keyword heuristic.
-        history=questions['history_needed']
-        self.assertEqual(set(history.get('criteria',{})),{'true','false'})
-        for criterion in history['criteria'].values():
-            self.assertTrue(criterion['definition'])
-            self.assertTrue(criterion['examples'])
+        # Owner 2026-11-23: Jev no longer judges history; the history owner asks for it instead.
+        self.assertNotIn('history_needed',questions)
 
     def test_luna_uses_medium_reasoning_native_structured_output_and_no_storage(self):
         payload = {'id':'resp_offline', 'object':'response', 'created_at':0,

@@ -132,12 +132,9 @@ class EvidenceService:
         self._judgments,self._unresolved_judgments={},[]
         self._resolution_candidates=[]
         self._pending_sources,self._pending_destinations=set(),set()
-        self._source_classification=None
-        self._history_outcome=None
         self._history_dispositions=[]  # Keep initial and supplementary outcomes; a later lookup cannot erase one.
         self._history_access_ids=set()  # Permission applies to exact reviewed records, not a later history search.
         self._history_subject='allowed'  # Latest code-owned subject decision for recalled employee history.
-        self._withheld_history_ids=set()  # A denial lasts for the request; a later search cannot reverse it.
         self._malicious_history_ids=set()  # Only successful per-ID review can establish this exclusion.
         self.answer_models=answer_models  # Explicit opt-in; no normal runtime model is enabled.
         self.routing_models=routing_models  # Routing tie-breaker model (owner 2026-11-23); None: answer models.
@@ -148,7 +145,7 @@ class EvidenceService:
         self._semantic_dependency=False
         self._work_timeout=None  # The serialized continuation may impose the earlier specialist cutoff.
 
-    def _adjudicate_route(self,decision,*,history=(),history_status='not_requested'):
+    def _adjudicate_route(self,decision):
         """Resolve semantics once; code retains access, source disposition and dispatch authority."""
         from shopunow.model_clients import RoutingResolution
         if self.answer_models is None or self._routing_attempted:
@@ -158,12 +155,8 @@ class EvidenceService:
             'subject':row.subject,'audience':list(row.eligible_audience),
             'classification':row.classification,'access_scope':row.access_scope}
             for row in self.catalog.values() if self.profile.role in row.eligible_audience]
-        if any(row.source_kind!='owned_history' or row.clearance!='clean' for row in history):
-            raise ValueError('Routing adjudication requires reviewed owned history.')
         payload={'question':self.request.question,'role':self.profile.role,
             'home_department':self.profile.home_department,'descriptors':descriptors,
-            'history_status':history_status,'history':[{'excerpt_id':row.excerpt_id,'text':row.text,
-                'conversation_id':row.conversation_id} for row in history],
             'judgments':{key:value.model_dump() for key,value in self._judgments.items()},
             'unresolved_judgments':list(self._unresolved_judgments)}
         raw=self._model((self.routing_models or self.answer_models).resolve_routing,payload)
@@ -197,10 +190,9 @@ class EvidenceService:
             if item.match!='uncertain':
                 self._pending_sources.discard(item.source_id)
                 self._unresolved_judgments=[value for value in self._unresolved_judgments if value!=key]
-        stage='history_route.' if any(key.startswith('history_route.') for key in self._judgments) else 'incoming.'
         proposed=[]
         for part in resolved.destinations:
-            key=stage+('company_wide_topic' if part=='central_support' else 'topic_'+part)
+            key='incoming.'+('company_wide_topic' if part=='central_support' else 'topic_'+part)
             answer=self._judgments.get(key)
             if (answer is None or key in self._unresolved_judgments or
                     (self.topic_trigger is not None and answer.noul>=self.topic_trigger)):
@@ -214,8 +206,8 @@ class EvidenceService:
             suffix='company_wide_topic' if part=='central_support' else 'topic_'+part
             self._unresolved_judgments=[key for key in self._unresolved_judgments
                                        if not key.endswith('.'+suffix)]
-        if not any(key.startswith('incoming.') and not (key.startswith('incoming.topic_') or key in (
-                'incoming.company_wide_topic','incoming.history_needed')) for key in self._unresolved_judgments):
+        if not any(key.startswith('incoming.') and not (key.startswith('incoming.topic_') or
+                key=='incoming.company_wide_topic') for key in self._unresolved_judgments):
             self._pending_destinations.difference_update(permitted)
         # Only an explicit information result with a usable route clears a low-confidence action label.
         weak_action=decision.intent=='individual_case_or_action' and intent_unresolved
@@ -227,6 +219,8 @@ class EvidenceService:
                                                                          and intent=='information') else
               'clarification_needed' if intent=='unclear_or_other' else
               'continue' if permitted else 'insufficient_evidence')
+        if kind=='insufficient_evidence' and not refused and intent=='information':
+            kind,permitted='continue',('central_support',)  # Owner 2026-11-23: central support owns it.
         return replace(decision,kind=kind,destinations=permitted,refused_departments=refused,
             intent=intent,dependency=dependency,proposed_destinations=permitted,
             requires_action_handoff=self._action_required)
@@ -267,16 +261,7 @@ class EvidenceService:
                 or not set(ids)<={row.excerpt_id for row in candidates}):
             raise ValueError('Unbound candidate adjudication.')
         self._judgments['semantic.candidates']=resolved
-        # History the user asked for stays visibly unresolved when no recalled excerpt was confirmed.
-        history_rejected=(any(row.source_kind=='owned_history' for row in candidates)
-            and not any(row.source_kind=='owned_history' for row in self._selected)
-            and not any(row.source_kind=='owned_history' and row.excerpt_id in ids for row in candidates))
-        rejected_outcome=PartDisposition('history','clarification_needed' if status=='ambiguous'
-                                         else 'insufficient_evidence')
         if status!='resolved':
-            if history_rejected:
-                self._relevance_unresolved.add('history')
-                self._history_dispositions.append(rejected_outcome)
             return replace(result,kind='clarification_needed' if status=='ambiguous' else result.kind)
         decided={row.excerpt_id for row in candidates}
         promoted=[replace(row,relevance_basis='semantic_adjudication') for row in candidates if row.excerpt_id in ids]
@@ -290,9 +275,6 @@ class EvidenceService:
         settled={row.destination for row in candidates} - {
             row.destination for row in self._resolution_candidates} - pending_parts
         self._relevance_unresolved.difference_update(settled)
-        if history_rejected:
-            self._relevance_unresolved.add('history')
-            self._history_dispositions.append(rejected_outcome)
         factual=any(row.source_kind in ('knowledge','owned_history') for row in self._selected)
         return replace(result,kind='ready' if factual and result.kind!='clarification_needed' else result.kind,
             cleared=tuple(self._selected),resolution_candidates=tuple(self._resolution_candidates),
@@ -467,7 +449,7 @@ class EvidenceService:
                          else 'incoming.topic_'+part for part in stable}
         self._unresolved_judgments=[key for key in self._unresolved_judgments if key not in resolved_topics]
         other_uncertainty=any(key.startswith('incoming.') and not (
-            key.startswith('incoming.topic_') or key in ('incoming.company_wide_topic','incoming.history_needed'))
+            key.startswith('incoming.topic_') or key=='incoming.company_wide_topic')
             for key in self._unresolved_judgments)
         if not other_uncertainty:
             self._pending_destinations.difference_update(stable)
@@ -541,8 +523,6 @@ class EvidenceService:
         except Exception:
             self._history_dispositions.append(PartDisposition('history','technical_failure'))
             raise
-        if kind=='withheld':
-            return 'clear',[]  # The earlier denial stays the recorded outcome; this is not an absence.
         if kind!='clear' or not candidates:
             outcome='clarification_needed' if kind=='ambiguous' else (
                 'unavailable' if kind=='clear' else 'insufficient_evidence')
@@ -550,8 +530,8 @@ class EvidenceService:
         return kind,candidates
 
     def _history_candidates(self, target):
-        if self.searches >= 2:
-            raise ValueError('History-search budget exhausted.')
+        if self.searches >= 1:
+            raise ValueError('History-search budget exhausted.')  # One search per request (owner 2026-11-23).
         self.searches += 1
         offset, seen, transcripts, candidates = 0,set(),{},[]
         while True:
@@ -581,10 +561,8 @@ class EvidenceService:
                     destination='history',conversation=conversation,metadata=metadata,
                     scope={'owner_user_id':self.profile.user_id,'kind':checked.record.kind}))
             offset += len(rows)  # A short page is not proof that no older case exists.
-        found=bool(candidates)
-        candidates=[row for row in candidates if row.source_record_id not in self._withheld_history_ids]
         if not candidates:
-            return ('withheld' if found else 'clear'),[]
+            return 'clear',[]
         kind,selected,uncertain = self._matching(target,candidates,f'history_{self.searches}')
         if (kind=='uncertain' and self.history_identity_resolver is not None and not self._identity_attempted):
             from shopunow.model_clients import HistoryIdentityResolution
@@ -662,9 +640,6 @@ class EvidenceService:
             clean.extend(replace(row,clearance='clean') for row in batch if mapping[row.excerpt_id]=='clean')
             self._malicious_history_ids.update(row.excerpt_id for row in batch
                 if row.source_kind=='owned_history' and mapping[row.excerpt_id]=='malicious')
-            # Excerpt IDs change per search, so the stored record stays excluded for this request.
-            self._withheld_history_ids.update(row.source_record_id for row in batch
-                if row.source_kind=='owned_history' and mapping[row.excerpt_id]=='malicious')
             if any(row.source_kind=='owned_history' and mapping[row.excerpt_id]=='uncertain' for row in batch):
                 self._history_dispositions.append(PartDisposition('history','security_fallback'))
             uncertain.update(row.destination for row in batch if mapping[row.excerpt_id]=='uncertain')
@@ -717,8 +692,6 @@ class EvidenceService:
             elif not refused and set(destinations)<=set(handoffs):
                 kind='handoff_needed'
         pending=result.pending_message_id or (None if self.pending is None else self.pending.message_id)
-        if self._history_outcome=='ambiguous' and kind in ('ready','insufficient_evidence'):
-            kind='clarification_needed'  # Useful independent facts do not resolve the historical reference.
         candidates=tuple(row for row in self._resolution_candidates
                          if row.source_kind!='owned_history' or row.source_record_id in self._history_access_ids) if kind in (
             'ready','insufficient_evidence','clarification_needed') else ()
@@ -763,12 +736,11 @@ class EvidenceService:
         return result
 
     def _prepare(self, decision):
-        if decision.kind not in ('continue','history_resolution','semantic_resolution'):
+        if decision.kind not in ('continue','semantic_resolution'):
             return EvidenceResult(decision.kind)
         if not self.attempt.authorize_normal_work():
             return EvidenceResult('stopped')
         try:
-            historical_refusal=False
             if decision.judgments is not None:
                 self._judgments.update(('incoming.'+key,value) for key,value in decision.judgments.items())
                 if self.semantic_confidence_trigger is not None:
@@ -790,12 +762,6 @@ class EvidenceService:
                 if decision.kind!='continue':
                     return EvidenceResult(decision.kind if decision.kind!='semantic_resolution'
                                           else 'insufficient_evidence')
-            if decision.kind=='history_resolution':
-                # This is pre-dispatch owned-case discovery, never an empty ordinary route.
-                decision,result=self._resolve_history(decision)
-                if result is not None:
-                    return result
-                historical_refusal=bool(decision.refused_departments)
             possible=tuple(part for part in decision.proposed_destinations
                 if self.profile.role!='customer' or part not in ('hr','it_support','facilities_admin'))
             lookups=tuple(dict.fromkeys((*decision.destinations,*(possible if
@@ -814,8 +780,7 @@ class EvidenceService:
                 self._save_pending()  # Case discovery already verified this exact pending intent.
             self.dependency=decision.dependency
             self.destinations=decision.destinations
-            permitted,refused,handoffs,uncertain_parts=(self._source_classification if
-                self._source_classification is not None else self._classify_sources(lookups))
+            permitted,refused,handoffs,uncertain_parts=self._classify_sources(lookups)
             if self.answer_models is not None and (uncertain_parts or self._unresolved_judgments):
                 decision=self._adjudicate_route(decision)
                 if decision.kind!='continue':
@@ -834,7 +799,7 @@ class EvidenceService:
             if self.dependency!='independent' and self.refused_parts:
                 return EvidenceResult('refusal',refused_parts=self.refused_parts)
             # Current-source dispositions do not block an independently requested owned-history lookup.
-            if (not permitted and (refused or handoffs) and not uncertain_parts and not decision.history_needed
+            if (not permitted and (refused or handoffs) and not uncertain_parts
                     and not any(row.source_kind=='owned_history' and row.clearance=='clean' for row in self._selected)):
                 return EvidenceResult('refusal' if refused else 'handoff_needed',
                     refused_parts=self.refused_parts,handoff_parts=handoffs)
@@ -854,12 +819,6 @@ class EvidenceService:
                     self._relevance_unresolved.update(row.destination for row in chosen
                                                      if row.relevance_basis=='semantic_resolution')
                 candidates=chosen
-            history_kind='clear'
-            if decision.history_needed:
-                history_kind,history=self._history(self.request.question)
-                if history_kind!='clear':
-                    self._relevance_unresolved.update(decision.destinations)
-                candidates.extend(history)
             if self.request.response_style is not None:
                 candidates.append(self._candidate(kind='preference',key='response_style',
                     text=self.request.response_style,destination='preference'))
@@ -872,13 +831,6 @@ class EvidenceService:
                 self._relevance_unresolved.difference_update(hints)
                 result=replace(result,unresolved_parts=tuple(part for part in result.unresolved_parts
                                                              if part not in hints))
-            if result.kind=='insufficient_evidence' and historical_refusal:
-                # Denied shared history cannot support the permitted recap; retain its clarification.
-                self.destinations=()  # No allowed context is available for a producer dispatch.
-                return replace(result,kind='clarification_needed')
-            if result.kind in ('ready','insufficient_evidence') and history_kind=='ambiguous':
-                # Retain independent clean context, but do not hide a genuinely ambiguous reference.
-                result=replace(result,kind='clarification_needed')
             return replace(result,unresolved_parts=tuple(dict.fromkeys(
                 (*result.unresolved_parts,*self.refused_parts,*self.handoff_parts))))
         except Exception:
@@ -916,7 +868,6 @@ class EvidenceService:
             self._history_access_ids.update(row.source_record_id for row in history)
             return result
         # No partition of shared history by subject exists. Withhold the whole newly selected set.
-        self._withheld_history_ids.update(row.source_record_id for row in history)
         excluded={row.excerpt_id for row in history}
         self._selected=[row for row in self._selected if row.excerpt_id not in excluded]
         self._resolution_candidates=[row for row in self._resolution_candidates if row.excerpt_id not in excluded]
@@ -934,33 +885,6 @@ class EvidenceService:
             row.destination in (part,'history') for row in self._selected))
         return replace(result,kind=kind,cleared=tuple(self._selected),
             unresolved_parts=tuple(dict.fromkeys((*result.unresolved_parts,*uncovered))))
-
-    def _recover_current(self,decision,kind):
-        """An unresolved recap cannot identify a route; current descriptors may identify independent help."""
-        if self.semantic_confidence_trigger is not None:
-            self._history_outcome=kind
-            self._relevance_unresolved.add('history')
-            if self.answer_models is not None:
-                decision=self._adjudicate_route(decision,history_status=kind)
-                if decision.kind!='continue':
-                    return decision,EvidenceResult(decision.kind)
-            dependency=(decision.judgments or {}).get('department_dependency')
-            if (decision.dependency=='independent' and decision.proposed_destinations
-                    and (self._semantic_dependency or dependency is None or semantic_confident(dependency,self.semantic_confidence_trigger))
-                    and decision.intent=='information' and not decision.requires_action_handoff):
-                possible=tuple(part for part in decision.proposed_destinations if self.profile.role!='customer'
-                               or part not in ('hr','it_support','facilities_admin'))
-                classified=self._classify_sources(possible)
-                permitted,refused,handoffs,uncertain=classified
-                self._relevance_unresolved.update(uncertain)
-                if permitted:
-                    self._source_classification=classified
-                    self._finalize_current_sources(decision,permitted)
-                    return replace(decision,kind='continue',destinations=self.destinations,
-                        proposed_destinations=tuple(permitted),history_needed=False),None
-                self.refused_parts=tuple(dict.fromkeys((*self.refused_parts,*refused)))
-                self.handoff_parts=handoffs
-        return decision,EvidenceResult('clarification_needed' if kind=='ambiguous' else 'insufficient_evidence')
 
     def _restricted_history_subjects(self):
         # Customers are refused by topic; employees need the exact internal subjects closed to them.
@@ -993,103 +917,6 @@ class EvidenceService:
         except Exception:
             self._history_dispositions.append(PartDisposition('history','technical_failure'))
             raise
-
-    def _resolve_history(self,decision):
-        from shopunow.incoming import _number
-        from shopunow.workflow import permitted_routes
-        _number(self.topic_trigger)
-        if (decision.destinations or decision.refused_departments or not decision.history_needed
-                or decision.intent!='information' or decision.requires_action_handoff):
-            raise ValueError('Invalid pre-dispatch history phase.')
-        self.dependency=decision.dependency
-        self._save_pending()
-        kind,candidates=self._history(self.request.question)
-        if kind!='clear':
-            return self._recover_current(decision,kind)
-        # A single unresolved recap still has the existing four-per-part cap before routing.
-        reviewed=self._clear(candidates,('history',))
-        if reviewed.kind!='ready' and not (reviewed.kind=='insufficient_evidence' and self._resolution_candidates):
-            if reviewed.kind=='insufficient_evidence' and (not candidates or
-                    {row.excerpt_id for row in candidates}<=self._malicious_history_ids):
-                # No usable historical match: independently requested current help may still be supported.
-                return self._recover_current(decision,'insufficient')
-            return decision,reviewed  # Review failures and capacity limits do not authorize recovery.
-        answers=self._historical_access(self.request.question,tuple(self._selected+self._resolution_candidates))
-        for key,answer in answers.items():
-            self._judgments['history_route.'+key]=answer
-        # A confident code-owned refusal is settled here; adjudication cannot replace or narrow it.
-        destinations,refused,dependency=permitted_routes(answers,role=self.profile.role,
-            topic_trigger=self.topic_trigger,semantic_confidence_trigger=self.semantic_confidence_trigger)
-        decision=replace(decision,refused_departments=refused,dependency=dependency)
-        if semantic_confident(answers['department_dependency'],self.semantic_confidence_trigger):
-            # The confident route about this exact history replaces the earlier incoming estimate.
-            self._unresolved_judgments=[key for key in self._unresolved_judgments
-                                        if key!='incoming.department_dependency']
-        self.refused_parts=refused
-        denied=self._history_subject=='restricted' or bool(refused)
-        withheld=denied or self._history_subject!='allowed'
-        if withheld:
-            # Denied or unclear history leaves here, before routing adjudication or any producer.
-            self._withheld_history_ids.update(row.source_record_id for row in
-                                              self._selected+self._resolution_candidates)
-            self._selected=[]
-            self._resolution_candidates=[]
-            if self._history_subject!='allowed':
-                self._relevance_unresolved.add('history')  # A topic refusal is already its own reported outcome.
-            self._history_dispositions.append(PartDisposition('history','refusal'
-                if denied else 'insufficient_evidence'))
-        if refused and dependency!='independent' and semantic_confident(answers['department_dependency'],
-                                                                        self.semantic_confidence_trigger):
-            # Nothing can be answered without the refused part, so no adjudicator reply can change the outcome.
-            self.dependency=dependency
-            return decision,EvidenceResult('refusal',refused_parts=refused,unresolved_parts=destinations)
-        adjudicated=None
-        if self.semantic_confidence_trigger is not None:
-            unsettled=[key for key,answer in answers.items()
-                       if not semantic_confident(answer,self.semantic_confidence_trigger)]
-            if unsettled:
-                self._unresolved_judgments.extend('history_route.'+key for key in unsettled)
-                if self.answer_models is not None:
-                    adjudicated=self._adjudicate_route(decision,
-                        history=tuple(self._selected+self._resolution_candidates),
-                        history_status='withheld' if withheld else 'clear')
-                if adjudicated is None or adjudicated.kind not in ('continue','refusal'):
-                    self._selected=[]
-                    self._resolution_candidates=[]
-                    return self._recover_current(adjudicated or decision,'uncertain')
-            # A new resolved subject replaces initial topic uncertainty rather than inheriting it.
-            self._unresolved_judgments=[key for key in self._unresolved_judgments if not (
-                key.startswith('incoming.topic_') or key in ('incoming.company_wide_topic','incoming.history_needed'))]
-            self._pending_destinations.clear()
-        if adjudicated is not None:
-            decision=adjudicated
-            destinations,refused,dependency=decision.destinations,decision.refused_departments,decision.dependency
-        self.refused_parts=refused
-        self.dependency=dependency
-        if withheld and (not destinations or dependency!='independent'):
-            return decision,EvidenceResult('refusal' if denied else 'insufficient_evidence',
-                refused_parts=refused,unresolved_parts=destinations)
-        if refused:
-            self._history_dispositions.append(PartDisposition('history','refusal'))
-            # Shared history has no per-subject permission partition: never pass denied context onward.
-            self._withheld_history_ids.update(row.source_record_id for row in
-                                              self._selected+self._resolution_candidates)
-            self._selected=[]
-            self._resolution_candidates=[]
-            if not destinations or dependency!='independent':
-                return decision,EvidenceResult('refusal',refused_parts=refused,unresolved_parts=destinations)
-            # Independent allowed current work still uses ordinary filtered source preparation.
-        if not destinations:
-            self._selected=[]
-            self._resolution_candidates=[]
-            return decision,EvidenceResult('handoff_needed')
-        if not refused:
-            self._history_access_ids.update(row.source_record_id for row in
-                                            self._selected+self._resolution_candidates)
-        self.destinations=destinations  # First route finalization, before Knowledge or producer dispatch.
-        return replace(decision,kind='continue',destinations=destinations,dependency=dependency,
-                       refused_departments=refused,history_needed=False,
-                       proposed_destinations=destinations),None  # Do not restore old search hints.
 
     def supplementary(self, *, target,work_timeout=None):
         # Supplementary insufficiency must not erase independently established refused parts.
