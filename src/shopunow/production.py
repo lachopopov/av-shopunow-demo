@@ -461,9 +461,8 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
         if security_failure:
             return result('security_fallback')
         central_owner=owner=='central_support' and owner_may_ask
-        # A central owner may still supply its own part from history; the check repeats after its answer.
-        if (any(part!='central_support' or not central_owner for part in unresolved)
-                and evidence.dependency!='independent'):
+        # Owner 2026-11-23: a central owner always runs and may fill gaps from history; the check repeats after it.
+        if unresolved and not central_owner and evidence.dependency!='independent':
             # A refused necessary premise (e.g. refused history) stays a refusal (challenge T2).
             refused=evidence.dependency=='dependent' and any(row.kind=='refusal'
                                                              for row in (*frozen,*supplementary_dispositions))
@@ -517,7 +516,9 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
                         answer=Contribution('central_support','security_fallback')
                         return result('security_fallback')
                     if extra.kind=='ready':
-                        unresolved=tuple(part for part in unresolved if part!='central_support')  # History supplied it.
+                        # History may fill parts that only lacked evidence; central support reports any still missing.
+                        gaps={row.part for row in base_dispositions if row.kind=='insufficient_evidence'}
+                        unresolved=tuple(part for part in unresolved if part not in gaps|{'central_support'})
                         # The same frozen contributors remain; new history adds context, never late membership.
                         pool.update((row.excerpt_id,row) for row in extra.cleared
                                     if row.destination in ('central_support','history','preference'))

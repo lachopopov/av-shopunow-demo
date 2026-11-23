@@ -147,6 +147,53 @@ class HistoryOwnerTests(unittest.TestCase):
         self.assertIn({'part':'hr','outcome':'refusal'},self.calls[1]['part_outcomes'])
         self.assertIn('hr',result.draft.unresolved_parts)
 
+    def test_dependent_departments_with_a_gap_let_central_support_ask_for_history(self):
+        # Owner 2026-11-23: with several departments central support always runs as history owner, even
+        # when a dependent question has a department without Knowledge; history may fill that gap.
+        from tests.test_incoming import judgment_answers
+        from shopunow.incoming import validate_history_route,HISTORY_ROUTE_FIELDS
+        self.history_search()
+        def route(*args,**kwargs):
+            answers=judgment_answers()
+            answers['topic_billing_payments']['noul']=1.
+            return validate_history_route({key:answers[key] for key in HISTORY_ROUTE_FIELDS})
+        self.fixture.models.history_route=route
+        self.service.destinations=('billing_payments','shipping_delivery')
+        self.service.dependency='dependent'
+        self.evidence=replace(self.evidence,destinations=self.service.destinations,dependency='dependent',
+                              unresolved_parts=('billing_payments',))  # Billing found no Knowledge.
+        def produce(payload,*,timeout):
+            self.calls.append(payload)
+            history=[row for row in payload['evidence'] if row['source_kind']=='owned_history']
+            if payload['part']=='central_support' and not history:
+                return context_needed({'part':payload['part'],'unresolved_parts':[],'reason':None,
+                                       'saved_action_claim_ids':[]})
+            return {'part':payload['part'],'kind':'supported_answer','text':'Held for the failed payment',
+                    'cited_ids':[(history or payload['evidence'])[0]['excerpt_id']],'support_assertion':True,
+                    'target':None,'reason':None,'unresolved_parts':[],'saved_action_claim_ids':[]}
+        self.models.produce=produce
+        result=self.run_production()
+        self.assertEqual(self.service.searches,1)
+        self.assertEqual(result.kind,'draft_ready')
+        self.assertEqual(result.draft.unresolved_parts,())
+
+    def test_dependent_gap_without_history_still_never_drafts(self):
+        # The later dependency check still blocks an incomplete dependent answer.
+        self.service.destinations=('billing_payments','shipping_delivery')
+        self.evidence=replace(self.evidence,destinations=self.service.destinations,dependency='dependent',
+                              unresolved_parts=('billing_payments',))
+        def produce(payload,*,timeout):
+            self.calls.append(payload)
+            if payload['part']=='central_support':
+                return {'part':payload['part'],'kind':'supported_answer','text':'Partial',
+                        'cited_ids':[payload['evidence'][0]['excerpt_id']],'support_assertion':True,'target':None,
+                        'reason':'billing missing','unresolved_parts':['central_support'],'saved_action_claim_ids':[]}
+            return self.produce(payload,timeout=timeout)
+        self.models.produce=produce
+        result=self.run_production()
+        self.assertEqual(result.kind,'insufficient_evidence')
+        self.assertIsNone(result.draft)
+
 
 class NoDepartmentRoutingTests(unittest.TestCase):
     # Q-c (owner 2026-11-23): no department + information -> central_support; unclear -> clarification; action -> offer.
