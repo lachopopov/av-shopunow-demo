@@ -137,7 +137,7 @@ class PrivateWorkflowFixture(IncomingFixture):
                 'dependency':self.dependency,'destinations':list(self.destinations),
                 'source_matches':[{'source_id':key,'match':match} for key,match in (
                     self.routing_matches.items() if self.routing_matches is not None
-                    else ((key,'relevant') for key in self.catalog))]}
+                    else ((row['source_id'],'relevant') for row in payload['descriptors']))]}  # Only sent entries.
         elif schema=='CandidateResolution':
             reply=self.candidate_reply(payload) if self.candidate_reply is not None else {'question':payload['question'],
                 'outcome':{'status':'resolved','relevant_excerpt_ids':[row['excerpt_id'] for row in payload['candidates']]}
