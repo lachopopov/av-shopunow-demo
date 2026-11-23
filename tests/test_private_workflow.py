@@ -496,26 +496,6 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn('shipping_delivery',result.unresolved_parts)
                 self.assertEqual(result.draft is not None,dependency=='independent')
 
-    async def test_the_router_receives_only_entries_of_departments_still_in_play(self):
-        # Break caught (owner decision 2026-11-23, routing speed): the router is sent every entry the role can
-        # see (slow: one verdict each), or misses the entries of a department Jev is unsure about (it then
-        # cannot rescue a correct entry). Shipping is a sure yes, company-wide a sure no, billing varies.
-        for situation,billing in (('one entry unsure',0.),('department unsure',.3)):
-            with self.subTest(situation):
-                await self.reset_http()
-                self.fixture=PrivateWorkflowFixture(self.http.tracking,
-                                                    source_ids=('SU-SD-001','SU-SD-006','SU-BP-004','SU-CW-002'))
-                self.addCleanup(self.fixture.close)
-                fixture=self.fixture
-                fixture.answers['topic_billing_payments']['noul']=billing
-                fixture.descriptor_matches={'source_SU_SD_006':'uncertain'}
-                fixture.routing_matches={'SU-SD-006':'relevant'}
-                await self.post()
-                routing=[json.loads(body['input']) for stage,body in fixture.calls if stage=='RoutingResolution']
-                self.assertEqual(len(routing),1)
-                expected={'SU-SD-001','SU-SD-006'}|({'SU-BP-004'} if situation=='department unsure' else set())
-                self.assertEqual({row['source_id'] for row in routing[0]['descriptors']},expected)
-
     async def test_undecided_search_hint_stays_visible_without_a_routing_decision(self):
         self.fixture=PrivateWorkflowFixture(self.http.tracking,source_ids=('SU-BP-004','SU-SD-002'))
         self.addCleanup(self.fixture.close)

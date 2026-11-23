@@ -154,33 +154,14 @@ class EvidenceService:
         if self.answer_models is None or self._routing_attempted:
             return decision
         self._routing_attempted=True  # Invalid/failed responses consume this opportunity too.
-        # Owner decision 2026-11-23 (routing speed): send only the entries of departments still in play, i.e.
-        # those Jev said yes to or is unsure about, the same rule the code applies to the router's proposals below.
-        # Departments Jev is sure are not involved stay out: the code would ignore the router on them anyway.
-        stage='history_route.' if any(key.startswith('history_route.') for key in self._judgments) else 'incoming.'
-        def topic_key(part):
-            return stage+('company_wide_topic' if part=='central_support' else 'topic_'+part)
-        def in_play(part):
-            answer=self._judgments.get(topic_key(part))
-            return (part in decision.destinations or answer is None or topic_key(part) in self._unresolved_judgments
-                    or (self.topic_trigger is not None and answer.noul>=self.topic_trigger))
-        def department(row):
-            return 'central_support' if row.subject=='company_wide' else row.subject
-        rows=[row for row in self.catalog.values()
-              if self.profile.role in row.eligible_audience and in_play(department(row))]
         descriptors=[{'source_id':row.source_id,'source_question':row.source_question,
             'subject':row.subject,'audience':list(row.eligible_audience),
-            'classification':row.classification,'access_scope':row.access_scope} for row in rows]
-        # The router answers only these: entries Jev was unsure about, and entries of departments it was unsure about.
-        unsure_entries={key.removeprefix('descriptors.source_').replace('_','-')
-                        for key in self._unresolved_judgments if key.startswith('descriptors.source_')}
-        decide_source_ids=[row.source_id for row in rows if row.source_id in unsure_entries
-                           or topic_key(department(row)) in self._unresolved_judgments]
+            'classification':row.classification,'access_scope':row.access_scope}
+            for row in self.catalog.values() if self.profile.role in row.eligible_audience]
         if any(row.source_kind!='owned_history' or row.clearance!='clean' for row in history):
             raise ValueError('Routing adjudication requires reviewed owned history.')
         payload={'question':self.request.question,'role':self.profile.role,
             'home_department':self.profile.home_department,'descriptors':descriptors,
-            'decide_source_ids':decide_source_ids,
             'history_status':history_status,'history':[{'excerpt_id':row.excerpt_id,'text':row.text,
                 'conversation_id':row.conversation_id} for row in history],
             'judgments':{key:value.model_dump() for key,value in self._judgments.items()},

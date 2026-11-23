@@ -366,8 +366,7 @@ class AnswerModels:
             'routing only. Missing facts are not a routing failure: when the request, its parts and '
             'destinations can be identified, return resolved even if history or sources lack a requested '
             'fact, because the producer judges factual sufficiency later. Identify restricted '
-            'topics honestly; code enforces access. Return source_matches only for the source_ids listed in '
-            'decide_source_ids, judging each independently; the other descriptors are context only. '
+            'topics honestly; code enforces access. Judge each supplied descriptor source_id independently. '
             'Do not generate an answer, fabricate historical facts, change safety/access or add sources.',timeout=timeout)
 
     def resolve_candidates(self, payload, *, timeout):
