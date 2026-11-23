@@ -12,9 +12,9 @@ class EvidenceClientTests(unittest.TestCase):
     def test_semantic_resolution_uses_explicit_shared_model_and_native_typed_output(self):
         # Wrong model configuration, omitted target binding or unobserved usage would break U1/U2.
         self.assertTrue(hasattr(model_clients,'AnswerModels'),'Shared answer/semantic adapter is missing')
-        parsed={'question':'What is tracking?','status':'resolved','intent':'information',
-            'dependency':'independent','destinations':['shipping_delivery'],
-            'source_matches':[{'source_id':'SU-SD-001','match':'relevant'}]}
+        # Owner 2026-11-23 (pass 3): the router returns only departments, intent, dependency and status.
+        parsed={'question':'What is tracking?','status':'resolved','departments':['shipping_delivery'],
+            'intent':'information','dependency':'independent'}
         payload={'id':'resp_resolution','object':'response','created_at':0,'status':'completed',
             'model':'controlled-answer','usage':{'input_tokens':11,'output_tokens':7,'total_tokens':18},
             'output':[{'id':'msg_resolution','type':'message','role':'assistant','status':'completed',
@@ -23,13 +23,16 @@ class EvidenceClientTests(unittest.TestCase):
         with OpenAI(api_key='offline-test',http_client=httpx2.Client(transport=self.transport(payload))) as client:
             models=model_clients.AnswerModels(client=client,model='controlled-answer',reasoning='low',
                 observe_response=lambda stage,response:observed.append((stage,response.model,response.usage.total_tokens)))
-            result=models.resolve_routing({'question':'What is tracking?','history_status':'unavailable'},timeout=2)
+            result=models.resolve_routing({'question':'What is tracking?','role':'customer',
+                                           'home_department':None},timeout=2)
         self.assertEqual(result.model_dump(),parsed)
         body=self.calls[0]
         self.assertEqual(body['model'],'controlled-answer')
         self.assertEqual(body['reasoning'],{'effort':'low'})
         self.assertIs(body['store'],False)
-        self.assertEqual(json.loads(body['input']),{'question':'What is tracking?','history_status':'unavailable'})
+        self.assertEqual(json.loads(body['input']),{'question':'What is tracking?','role':'customer',
+                                                    'home_department':None})
+        self.assertEqual(body['text']['format']['name'],'RouterDecision')
         self.assertEqual(observed,[('semantic_routing','controlled-answer',18)])
 
     def test_semantic_candidate_resolution_rejects_extra_output_and_refusal(self):
@@ -64,11 +67,21 @@ class EvidenceClientTests(unittest.TestCase):
             self.native_request(lambda models:models.resolve_candidates({'question':'Q'},timeout=2),
                 {'question':'Q','outcome':{'status':'insufficient','relevant_excerpt_ids':['e1']}})
 
-    def test_routing_contract_separates_missing_facts_from_unresolved_routing(self):
-        reply={'question':'Q','status':'resolved','intent':'information','dependency':'independent',
-               'destinations':['hr'],'source_matches':[]}
+    def test_router_prompt_is_the_approved_short_general_prompt_with_examples(self):
+        # Owner-approved text (plan §5.1, 2026-11-23): general prompt, recap rule, few-shot examples.
+        reply={'question':'Q','status':'resolved','departments':['hr'],'intent':'information',
+               'dependency':'independent'}
         _,body=self.native_request(lambda models:models.resolve_routing({'question':'Q'},timeout=2),reply)
-        self.assertIn('Missing facts are not a routing failure',body['instructions'])
+        for text in ('You route one ShopUNow support question. Do not answer it.',
+                     'Name departments honestly even if the role may not access them; code enforces access.',
+                     'A recap of an earlier conversation is information',
+                     "'Any news on that?' -> central_support, unclear_or_other",
+                     "'I need help with my account.' -> ambiguous"):
+            self.assertIn(text,body['instructions'])
+        self.assertNotIn('descriptor',body['instructions'])
+        with self.assertRaises(ValueError):  # No answer-like or entry fields can be returned.
+            self.native_request(lambda models:models.resolve_routing({'question':'Q'},timeout=2),
+                                {**reply,'source_matches':[]})
 
     def test_native_history_identity_has_full_pool_no_judgment_hints_and_observed_usage(self):
         parsed={'status':'clear','selected_excerpt_ids':['e2']}

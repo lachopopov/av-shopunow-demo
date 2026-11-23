@@ -145,23 +145,21 @@ class EvidenceService:
 
     def _adjudicate_route(self,decision):
         """Resolve semantics once; code retains access, source disposition and dispatch authority."""
-        from shopunow.model_clients import RoutingResolution
+        from shopunow.model_clients import RouterDecision
         if self.answer_models is None or self._routing_attempted:
             return decision
         self._routing_attempted=True  # Invalid/failed responses consume this opportunity too.
+        # D5 (owner 2026-11-23): the question, role and home department only; never entries, history or scores.
         payload={'question':self.request.question,'role':self.profile.role,
-            'home_department':self.profile.home_department,
-            'judgments':{key:value.model_dump() for key,value in self._judgments.items()},
-            'unresolved_judgments':list(self._unresolved_judgments)}
+                 'home_department':self.profile.home_department}
         raw=self._model((self.routing_models or self.answer_models).resolve_routing,payload)
-        resolved=RoutingResolution.model_validate(raw.model_dump() if hasattr(raw,'model_dump') else raw)
+        resolved=RouterDecision.model_validate(raw.model_dump() if hasattr(raw,'model_dump') else raw)
         if (resolved.question!=self.request.question
-                or len(resolved.destinations)!=len(set(resolved.destinations))):
+                or len(resolved.departments)!=len(set(resolved.departments))):
             raise ValueError('Unbound routing adjudication.')
         self._judgments['semantic.routing']=resolved
         if resolved.status!='resolved':
-            return replace(decision,kind='clarification_needed' if resolved.status=='ambiguous'
-                           else 'insufficient_evidence')
+            return replace(decision,kind='clarification_needed')  # The question could mean different things.
         # Nullable values never replace an unresolved judgment with a convenient default.
         intent_unresolved=('incoming.intent' in self._unresolved_judgments or decision.kind=='semantic_resolution')
         dependency_unresolved=any(key.endswith('.department_dependency') for key in self._unresolved_judgments)
@@ -175,7 +173,7 @@ class EvidenceService:
             self._unresolved_judgments=[key for key in self._unresolved_judgments
                                        if not key.endswith('.department_dependency')]
         proposed=[]
-        for part in resolved.destinations:
+        for part in resolved.departments:
             key='incoming.'+('company_wide_topic' if part=='central_support' else 'topic_'+part)
             answer=self._judgments.get(key)
             if (answer is None or key in self._unresolved_judgments or

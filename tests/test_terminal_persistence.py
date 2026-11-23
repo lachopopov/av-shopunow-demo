@@ -631,7 +631,7 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
         for schema, body in fixture.calls:
             if isinstance(body, dict) and 'model' in body:
                 sent.setdefault(schema, (body['model'], (body.get('reasoning') or {}).get('effort')))
-        self.assertEqual(sent['RoutingResolution'], ('gpt-6.1-sol', 'low'))
+        self.assertEqual(sent['RouterDecision'], ('gpt-6.1-sol', 'low'))
         self.assertEqual(sent['ProducerReply'], ('gpt-6.1-sol', 'medium'))
 
     async def test_the_served_wiring_reports_each_answer_step_in_order_and_clears_it_at_the_end(self):

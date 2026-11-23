@@ -31,7 +31,6 @@ class PrivateWorkflowFixture(IncomingFixture):
         self.history_topic_score=1.  # Controlled strength of a routed historical topic.
         self.history_company_score=None  # Optional separate company-wide score on the history route.
         self.history_topic_scores={}  # Optional per-topic scores that replace the shared routed strength.
-        self.routing_matches=None  # Optional adjudicated source labels; None marks every source relevant.
         self.routing_intent='information'  # Controlled adjudicated intent; None leaves intent unresolved.
         self.semantic_confidence_trigger=.7  # Explicit workflow configuration; None means not configured.
         self.restricted_history=self.choice('not_restricted',('restricted','not_restricted','uncertain'))
@@ -135,12 +134,9 @@ class PrivateWorkflowFixture(IncomingFixture):
         elif schema=='ExcerptReview':
             reply={'verdicts':[{'excerpt_id':row['excerpt_id'],'verdict':self.history_verdict
                 if row['source_kind']=='owned_history' else self.current_verdict} for row in payload]}
-        elif schema=='RoutingResolution':
+        elif schema=='RouterDecision':
             reply={'question':payload['question'],'status':self.routing_status,'intent':self.routing_intent,
-                'dependency':self.dependency,'destinations':list(self.destinations),
-                'source_matches':[{'source_id':key,'match':match} for key,match in (
-                    self.routing_matches.items() if self.routing_matches is not None
-                    else ((key,'relevant') for key in self.catalog))]}
+                'dependency':self.dependency,'departments':list(self.destinations)}
         elif schema=='CandidateResolution':
             reply=self.candidate_reply(payload) if self.candidate_reply is not None else {'question':payload['question'],
                 'outcome':{'status':'resolved','relevant_excerpt_ids':[row['excerpt_id'] for row in payload['candidates']]}

@@ -330,7 +330,6 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                         fixture.answers['department_dependency']=fixture.choice(dependency,labels)
                         fixture.dependency=dependency
                         fixture.destinations=(main,)
-                        fixture.routing_matches={} if reply=='omitted' else {sources[1]:reply}
                         await self.post()
                         result=fixture.boundaries[0]
                         self.assertEqual(result.kind,'draft_ready')
@@ -375,14 +374,14 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 fixture.answers['intent']=self.action_label(confidence)
                 await self.post()
                 result=fixture.boundaries[0]
-                self.assertEqual(sum(stage=='RoutingResolution' for stage,_ in fixture.calls),1)
+                self.assertEqual(sum(stage=='RouterDecision' for stage,_ in fixture.calls),1)
                 self.assertEqual(result.kind,'draft_ready')
                 self.assertEqual([row['part'] for row in fixture.producer_calls],['shipping_delivery'])
                 self.assertNotIn('action',[row.part for row in result.dispositions])
 
     async def test_unsettled_or_confirmed_action_keeps_its_handoff_outcome(self):
         def failing(stage):
-            if stage=='RoutingResolution':
+            if stage=='RouterDecision':
                 raise RuntimeError('Controlled routing failure')
         for name,intent,status,hook,produces in (
                 ('confirmed action','individual_case_or_action','resolved',None,False),
@@ -409,7 +408,7 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         fixture.answers['intent']={'type':'choice','choice':'mixed','confidence':.5,'probabilities':{
             'mixed':.6,'information':.2,'individual_case_or_action':.1,'unclear_or_other':.1}}
         await self.post()
-        self.assertTrue(any(stage=='RoutingResolution' for stage,_ in fixture.calls))
+        self.assertTrue(any(stage=='RouterDecision' for stage,_ in fixture.calls))
         self.assertIn(('action','handoff_needed'),[(row.part,row.kind) for row in fixture.boundaries[0].dispositions])
 
     async def test_settled_action_label_never_reaches_routing_adjudication(self):
@@ -423,7 +422,7 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 fixture.answers['topic_shipping_delivery']['noul']=topic
                 fixture.answers['sentiment']=fixture.choice(sentiment,('positive','neutral','negative'))
                 await self.post()
-                self.assertFalse(any(stage=='RoutingResolution' for stage,_ in fixture.calls))
+                self.assertFalse(any(stage=='RouterDecision' for stage,_ in fixture.calls))
                 self.assertEqual(fixture.boundaries[0].kind,'handoff_needed')
                 self.assertEqual(fixture.producer_calls,[])
 
@@ -434,7 +433,7 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         fixture.destinations=('hr','shipping_delivery')
         await self.post()
         result=fixture.boundaries[0]
-        self.assertTrue(any(stage=='RoutingResolution' for stage,_ in fixture.calls))
+        self.assertTrue(any(stage=='RouterDecision' for stage,_ in fixture.calls))
         self.assertIn(('hr','refusal'),[(row.part,row.kind) for row in result.dispositions])
         self.assertEqual([row['part'] for row in fixture.producer_calls],['shipping_delivery'])
         restricted=await self.fresh_fixture()
@@ -463,7 +462,7 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         fixture.answers['topic_shipping_delivery']['noul']=.35  # Only a weak hint exists.
         fixture.destinations=()  # The adjudicator says information but names no department.
         await self.post()
-        self.assertTrue(any(stage=='RoutingResolution' for stage,_ in fixture.calls))
+        self.assertTrue(any(stage=='RouterDecision' for stage,_ in fixture.calls))
         # Owner 2026-11-23 (Q-c): information naming no department goes to central support, the history owner.
         self.assertEqual([row['part'] for row in fixture.producer_calls],['central_support'])
         self.assertTrue(fixture.producer_calls[0]['history_owner'])

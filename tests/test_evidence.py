@@ -274,7 +274,8 @@ class EvidenceTests(unittest.TestCase):
                                  ['decision'].kind,want)
 
     def test_semantic_resolution_preserves_ambiguity_and_rejects_unbound_response_once(self):
-        for status,want in (('ambiguous','clarification_needed'),('insufficient','insufficient_evidence')):
+        # Pass 3: RouterDecision has only resolved/ambiguous; any other status is an invalid reply.
+        for status,want in (('ambiguous','clarification_needed'),('insufficient','technical_failure')):
             with self.subTest(status=status):
                 self.setUp()
                 self.service.semantic_confidence_trigger=.7
@@ -302,8 +303,7 @@ class EvidenceTests(unittest.TestCase):
         def route(payload, *, timeout):
             calls.append(('routing',payload))
             return {'question':payload['question'],'status':status,'intent':'information',
-                'dependency':dependency,'destinations':[destination],
-                'source_matches':[]}  # Owner 2026-11-23: the router no longer sees Knowledge entries.
+                'dependency':dependency,'departments':[destination]}  # Owner 2026-11-23: RouterDecision.
         def candidates(payload, *, timeout):
             calls.append(('candidates',payload))
             return {'question':payload['question'],'outcome':{'status':status,
