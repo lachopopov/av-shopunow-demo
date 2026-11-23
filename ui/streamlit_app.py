@@ -2,6 +2,7 @@
 # Shared password gate and synthetic profiles: a demo boundary, not real authentication (MLD §1).
 import hmac  # Constant-time password comparison.
 import os
+import time  # Monotonic clock for the processing time shown with each result.
 from concurrent.futures import ThreadPoolExecutor
 import streamlit as st
 import api_client
@@ -68,18 +69,29 @@ def selection():
     return (st.session_state.get('user_id'), st.session_state.conversation_id, st.session_state.generation)
 
 
-def add(kind, text, *, offer_id=None, sel=None):
-    st.session_state.transcript.append({'sel': sel or selection(), 'kind': kind, 'text': text, 'offer_id': offer_id})
+def add(kind, text, *, offer_id=None, sel=None, seconds=None):
+    st.session_state.transcript.append({'sel': sel or selection(), 'kind': kind, 'text': text, 'offer_id': offer_id,
+                                        'seconds': seconds})
+
+
+def timed_ask(timer, ask, *args):
+    # Runs in the worker thread: times the backend round trip itself, independent of page reruns.
+    started = time.monotonic()
+    try:
+        return ask(*args)
+    finally:
+        timer['seconds'] = time.monotonic() - started
 
 
 def collect(pending):
     # Store a finished question's result under the selection that asked it (shown only there).
     result = pending['future'].result()
+    seconds = pending.get('timer', {}).get('seconds')  # Owner request 2026-11-23: show processing time.
     if not result.ok:
-        add('warning' if result.uncertain else 'error', result.message, sel=pending['sel'])
+        add('warning' if result.uncertain else 'error', result.message, sel=pending['sel'], seconds=seconds)
     else:
         outcome = result.body['outcome']
-        add('assistant', outcome['text'], sel=pending['sel'], offer_id=outcome.get('offer_id'))
+        add('assistant', outcome['text'], sel=pending['sel'], offer_id=outcome.get('offer_id'), seconds=seconds)
     st.session_state.pending = None
 
 
@@ -171,6 +183,8 @@ for row in api_client.visible(st.session_state.transcript, current):
         st.info(row['text'])
     else:
         getattr(st, row['kind'])(row['text'])
+    if row.get('seconds') is not None:
+        st.caption(f"Processed in {row['seconds']:.1f} s")
     offer_id = row['offer_id']
     if offer_id is None:
         continue
@@ -217,8 +231,10 @@ if question:
     with st.chat_message('user'):
         st.text(question)
     waiting = st.empty()
-    pending = {'sel': captured, 'future': request_pool().submit(client.ask, captured[0], captured[1],
-                                                                 question, None)}  # Evaluated path: no style.
+    timer = {}
+    pending = {'sel': captured, 'timer': timer,
+               'future': request_pool().submit(timed_ask, timer, client.ask, captured[0], captured[1],
+                                               question, None)}  # Evaluated path: no style.
     st.session_state.pending = pending  # Survives an interrupted run.
     api_client.wait_with_notice(pending['future'], lambda: waiting.info(NOTICE_TEXT))
     waiting.empty()

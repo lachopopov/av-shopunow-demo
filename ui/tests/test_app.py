@@ -182,6 +182,18 @@ class AppTests(unittest.TestCase):
         self.assertEqual(len(sent), 1)
         self.assertNotIn('response_style', sent[0])
 
+    def test_each_question_result_shows_its_processing_time(self):
+        # Break caught (owner request 2026-11-23): the user cannot see how long a question took, for an answer
+        # as well as for a failed or uncertain result.
+        import re
+        at = self.chat()
+        self.backend.outcome = {'kind': 'answer', 'text': 'Timed answer.', 'cited_ids': []}
+        at.chat_input(key='question').set_value('First?').run()
+        self.assertEqual(len(re.findall(r'Processed in \d+\.\d s', self.rendered(at))), 1)
+        self.backend.outcome = None  # The controlled backend answers 503: an uncertain result.
+        at.chat_input(key='question').set_value('Second?').run()
+        self.assertEqual(len(re.findall(r'Processed in \d+\.\d s', self.rendered(at))), 2)
+
     def test_a_still_running_question_shows_the_notice_and_blocks_a_second_question(self):
         # Break caught: after an interrupted run the user sees nothing and can send a duplicate question.
         from concurrent.futures import Future
