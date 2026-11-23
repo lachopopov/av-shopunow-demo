@@ -117,7 +117,7 @@ def reopen_changed():
             add('notice', notice['code_owned_text'], offer_id=notice['offer_id'])
 
 
-# --- Sidebar: profile, response style, conversations ------------------------------------------
+# --- Sidebar: profile, conversations (no response style: owner decision 2026-11-23) ---------------
 with st.sidebar:
     st.warning(DEMO_NOTICE, icon=':material/info:')  # Shown before any profile or contact detail is used.
     user_id = st.selectbox('Synthetic profile', PROFILES, index=None, key='user_id', on_change=profile_changed,
@@ -132,8 +132,6 @@ with st.sidebar:
         else:
             st.caption(f"Role: {binding['role']}" + (f" · Department: {binding['home_department']}"
                                                       if binding['home_department'] else ''))
-    style = st.segmented_control('Response style', ['brief', 'detailed'], key='style')
-    st.caption('Applies to this session; not saved.')
     if user_id and binding and 'error' not in binding:
         if st.button('New conversation', key='new_conversation', icon=':material/add:'):
             created = client.create_conversation(user_id)  # One explicit attempt; never retried here.
@@ -220,7 +218,7 @@ if question:
         st.text(question)
     waiting = st.empty()
     pending = {'sel': captured, 'future': request_pool().submit(client.ask, captured[0], captured[1],
-                                                                 question, style)}
+                                                                 question, None)}  # Evaluated path: no style.
     st.session_state.pending = pending  # Survives an interrupted run.
     api_client.wait_with_notice(pending['future'], lambda: waiting.info(NOTICE_TEXT))
     waiting.empty()

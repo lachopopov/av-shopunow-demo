@@ -170,6 +170,18 @@ class AppTests(unittest.TestCase):
         self.assertIn('Late but kept.', self.rendered(at))
         self.assertIsNone(at.session_state['pending'])
 
+    def test_no_response_style_can_be_chosen_and_questions_use_the_evaluated_path(self):
+        # Break caught (owner decision 2026-11-23): a style control that makes every answer end in a technical
+        # failure, or a question sent with a style the evaluation never covered.
+        at = self.chat()
+        self.assertEqual([w for w in at.button_group if w.label == 'Response style'], [])
+        self.assertNotIn('Response style', self.rendered(at))
+        self.backend.outcome = {'kind': 'answer', 'text': 'Plain answer.', 'cited_ids': []}
+        at.chat_input(key='question').set_value('Question?').run()
+        sent = [body for method, path, body in self.backend.calls if path == '/interactions']
+        self.assertEqual(len(sent), 1)
+        self.assertNotIn('response_style', sent[0])
+
     def test_a_still_running_question_shows_the_notice_and_blocks_a_second_question(self):
         # Break caught: after an interrupted run the user sees nothing and can send a duplicate question.
         from concurrent.futures import Future
