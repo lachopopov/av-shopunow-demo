@@ -26,3 +26,6 @@ evaluation/results/
 handover_tracking/
 /backups_important/
 *.log
+
+# Evaluation data stays local (never published)
+datasets/

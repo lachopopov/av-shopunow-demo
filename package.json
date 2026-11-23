@@ -1,0 +1,7 @@
+{
+  "name": "shopunow-triage-evaluation",
+  "private": true,
+  "devDependencies": {
+    "promptfoo": "0.124.1"
+  }
+}
