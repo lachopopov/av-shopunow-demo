@@ -119,7 +119,7 @@ class EvidenceTests(unittest.TestCase):
                     intent='mixed',dependency='independent',requires_action_handoff=True))
                 self.assertEqual(result.kind,'technical_failure')
                 self.assertEqual(result.refused_parts,('hr',))
-                self.assertEqual(result.handoff_parts,('billing_payments',))
+                self.assertEqual(result.handoff_parts,())  # Pass 2: no entry match marks a part for handoff.
                 self.assertTrue({'shipping_delivery','hr','billing_payments'}<=set(result.unresolved_parts))
                 self.assertEqual(result.destinations,('shipping_delivery','billing_payments'))
                 self.assertEqual(result.dependency,'independent')
@@ -213,35 +213,18 @@ class EvidenceTests(unittest.TestCase):
     def test_unrelated_adjudication_cannot_erase_confident_mixed_action_or_source_match(self):
         from tests.test_incoming import judgment_answers
         from shopunow.incoming import validate_judgments
-        from typesafe_sdk import ChoiceAnswer
         self.service.semantic_confidence_trigger=.7
         self.service.answer_models,calls=self.semantic_adapter()
         answers=judgment_answers()
         answers['intent'].update(choice='mixed',probabilities={
             key:float(key=='mixed') for key in answers['intent']['probabilities']})
-        # Only the source descriptor is unresolved; action intent was already settled.
-        original=self.models.relevance
-        def relevance(question,candidates,*,timeout):
-            if candidates[0].source_kind=='source_descriptor':
-                return {row.excerpt_id:ChoiceAnswer(type='choice',choice='uncertain',confidence=1.,
-                    probabilities={'relevant':0.,'irrelevant':0.,'uncertain':1.}) for row in candidates}
-            return original(question,candidates,timeout=timeout)
-        self.models.relevance=relevance
-        result=self.service.prepare(IncomingDecision('continue',destinations=('shipping_delivery',),
-            intent='mixed',requires_action_handoff=True,judgments=validate_judgments(answers)))
-        self.assertTrue(getattr(result,'requires_action_handoff',False))
-        # An adjudication for incoming dependency cannot overturn a confident irrelevant descriptor.
-        self.setUp()
-        self.service.semantic_confidence_trigger=.7
-        self.service.answer_models,calls=self.semantic_adapter()
-        self.models.relevance=lambda question,candidates,**kwargs:relevance_answers(candidates,selected=())
-        answers=judgment_answers()
+        # Only the dependency is unsure, so the router runs; its 'information' cannot erase a confident action.
         answers['department_dependency'].update(confidence=.4,probabilities={
             'independent':.6,'dependent':.39,'unclear':.01})
         result=self.service.prepare(IncomingDecision('continue',destinations=('shipping_delivery',),
-            intent='information',judgments=validate_judgments(answers)))
-        self.assertEqual(result.cleared,())
-        self.assertFalse(any(isinstance(call,tuple) and call[0]=='knowledge' for call in self.storage.calls))
+            intent='mixed',requires_action_handoff=True,judgments=validate_judgments(answers)))
+        self.assertEqual([kind for kind,_ in calls],['routing'])
+        self.assertTrue(getattr(result,'requires_action_handoff',False))
 
     def test_adjudication_preserves_established_refusal_and_access_precedes_action_handoff(self):
         from tests.test_incoming import judgment_answers
@@ -320,32 +303,13 @@ class EvidenceTests(unittest.TestCase):
             calls.append(('routing',payload))
             return {'question':payload['question'],'status':status,'intent':'information',
                 'dependency':dependency,'destinations':[destination],
-                'source_matches':[{'source_id':row['source_id'],'match':'relevant'}
-                                  for row in payload['descriptors']]}
+                'source_matches':[]}  # Owner 2026-11-23: the router no longer sees Knowledge entries.
         def candidates(payload, *, timeout):
             calls.append(('candidates',payload))
             return {'question':payload['question'],'outcome':{'status':status,
                     'relevant_excerpt_ids':[row['excerpt_id'] for row in payload['candidates']]}
                     if status=='resolved' else {'status':status}}
         return SimpleNamespace(resolve_routing=route,resolve_candidates=candidates),calls
-
-    def test_adjudication_admits_clean_pending_source_without_changing_native_judgment(self):
-        # Resolving a descriptor must make useful facts available, not leave an inert candidate envelope.
-        from typesafe_sdk import ChoiceAnswer
-        self.service.semantic_confidence_trigger=.7
-        original=self.models.relevance
-        def relevance(question,candidates,*,timeout):
-            if candidates[0].source_kind=='source_descriptor':
-                return {row.excerpt_id:ChoiceAnswer(type='choice',choice='relevant',confidence=.4,
-                    probabilities={'relevant':.6,'irrelevant':.39,'uncertain':.01}) for row in candidates}
-            return original(question,candidates,timeout=timeout)
-        self.models.relevance=relevance
-        self.service.answer_models,calls=self.semantic_adapter()
-        result=self.prepare(intent='information')
-        self.assertEqual([row.source_record_id for row in result.cleared],['SU-SD-001'])
-        self.assertEqual(result.resolution_candidates,())
-        self.assertEqual([stage for stage,_ in calls],['routing'])
-        self.assertEqual(result.judgments['descriptors.source_SU_SD_001'].confidence,.4)
 
     def test_candidate_adjudication_cannot_use_unknown_ids_or_security_uncertain_text(self):
         from typesafe_sdk import ChoiceAnswer
@@ -401,7 +365,8 @@ class EvidenceTests(unittest.TestCase):
                 result=self.prepare()
                 self.assertEqual(result.cleared,())
                 self.assertEqual(result.resolution_candidates,())
-                self.assertFalse(any(isinstance(call,tuple) and call[0]=='knowledge' for call in self.storage.calls))
+                # Pass 2: the department is searched; restricted rows and confident irrelevance still admit nothing.
+                self.assertTrue(any(isinstance(call,tuple) and call[0]=='knowledge' for call in self.storage.calls))
 
     def test_uncertain_restricted_topic_remains_unresolved_without_facts_or_technical_failure(self):
         from shopunow.incoming import validate_judgments
@@ -448,133 +413,6 @@ class EvidenceTests(unittest.TestCase):
                 self.assertEqual([row.source_kind for row in result.resolution_candidates],
                                  ['owned_history'] if subject=='shipping_delivery' and verdict=='clean' else [])
                 self.assertEqual(result.refused_parts,('hr',) if subject=='hr' else ())
-
-    def test_unsettled_general_source_is_only_resolution_context_and_still_needs_security_clearance(self):
-        from typesafe_sdk import ChoiceAnswer
-        for verdict in ('clean','malicious','uncertain'):
-            with self.subTest(verdict=verdict):
-                self.setUp()
-                self.service.semantic_confidence_trigger=.7
-                self.models.verdict=verdict
-                def relevance(question,candidates,*,timeout):
-                    answers=relevance_answers(candidates)
-                    if candidates[0].source_kind=='source_descriptor':
-                        key=candidates[0].excerpt_id
-                        answers[key]=ChoiceAnswer(type='choice',choice='irrelevant',confidence=.385,
-                            probabilities={'relevant':.40,'irrelevant':.59,'uncertain':.01})
-                    return answers
-                self.models.relevance=relevance
-                result=self.prepare()
-                self.assertNotEqual(result.kind,'technical_failure')
-                self.assertEqual(result.cleared,())
-                self.assertEqual([row.source_record_id for row in result.resolution_candidates],
-                                 ['SU-SD-001'] if verdict=='clean' else [])
-                self.assertTrue(all(row.clearance=='clean' for row in result.resolution_candidates))
-                self.assertIn('shipping_delivery',result.unresolved_parts)
-                self.assertTrue(result.unresolved_judgments)
-                self.assertEqual(self.storage.calls.count('pending_write'),1)
-
-    def test_graph_current_recovery_resolves_only_superseded_topic_uncertainty(self):
-        from shopunow.incoming import IncomingContext
-        from shopunow.workflow import build_incoming_graph
-        from tests.test_incoming import judgment_answers
-        # Descriptor relevance can replace a weak topic; it cannot settle intent or dependency.
-        for weak in ('topic','intent','department_dependency','sentiment'):
-            with self.subTest(weak=weak):
-                self.setUp()
-                self.service.semantic_confidence_trigger=.7
-                self.service.topic_trigger=.5
-                self.request.question='Recap my prior delivery case; separately explain tracking.'
-                answers=judgment_answers()
-                answers['topic_shipping_delivery']['noul']=.53
-                if weak in ('intent','department_dependency','sentiment'):
-                    answer=answers[weak]
-                    answer['confidence']=.4
-                    answer['probabilities']={label:(.6 if label==answer['choice'] else
-                        .4/(len(answer['probabilities'])-1)) for label in answer['probabilities']}
-                graph=build_incoming_graph(judge=lambda context:answers,reviewer=None,authorize=lambda:True,
-                    security_trigger=.7,topic_trigger=.5,semantic_confidence_trigger=.7)
-                decision=graph.invoke({'context':IncomingContext(self.request.question,'customer',None,(),False)})['decision']
-                self.assertEqual(decision.kind,'continue')  # Owner 2026-11-23: history no longer routes.
-                result=self.service.prepare(decision)
-                # Owner decision 2026-11-19 (R3): a weak sentiment label never holds back evidence.
-                supported=weak in ('topic','sentiment')
-                self.assertEqual([row.source_record_id for row in result.cleared],
-                                 ['SU-SD-001'] if supported else [])
-                # The descriptor settles the topic; a weak dependency stays unresolved (checked below).
-                self.assertEqual(result.destinations,('shipping_delivery',) if weak!='intent' else ())
-                if weak=='department_dependency':
-                    self.assertIn('incoming.department_dependency',result.unresolved_judgments)
-                # A weak intent or dependency keeps the row as resolution context only, never as a fact.
-                self.assertEqual([row.source_record_id for row in result.resolution_candidates],
-                                 ['SU-SD-001'] if weak in ('intent','department_dependency') else [])
-                if weak=='intent':
-                    self.assertEqual(result.cleared,())
-                    self.assertIn('incoming.intent',result.unresolved_judgments)
-                self.assertEqual(self.storage.calls.count('pending_write'),1)
-                self.assertIn('incoming.topic_shipping_delivery',result.judgments)
-                if weak=='sentiment':
-                    self.assertNotIn('incoming.sentiment',result.unresolved_judgments)
-
-    def test_ordinary_source_progress_preserves_other_uncertainty_and_fact_gates(self):
-        from shopunow.incoming import validate_judgments
-        from tests.test_incoming import judgment_answers
-        from typesafe_sdk import ChoiceAnswer
-        for weak_fact in (False,True):
-            with self.subTest(weak_fact=weak_fact):
-                self.setUp()
-                self.service.semantic_confidence_trigger=.7
-                answers=judgment_answers()
-                answers['topic_shipping_delivery']['noul']=.57
-                answers['topic_billing_payments']['noul']=.59
-                def relevance(question,candidates,*,timeout):
-                    values=relevance_answers(candidates)
-                    if weak_fact and candidates[0].source_kind=='knowledge':
-                        key=candidates[0].excerpt_id
-                        values[key]=ChoiceAnswer(type='choice',choice='relevant',confidence=.4,
-                            probabilities={'relevant':.6,'irrelevant':.3,'uncertain':.1})
-                    return values
-                self.models.relevance=relevance
-                result=self.service.prepare(IncomingDecision('continue',intent='information',
-                    proposed_destinations=('shipping_delivery','billing_payments'),
-                    judgments=validate_judgments(answers)))
-                self.assertEqual(result.destinations,('shipping_delivery',))
-                self.assertEqual([r.source_record_id for r in result.cleared],[] if weak_fact else ['SU-SD-001'])
-                self.assertEqual([r.source_record_id for r in result.resolution_candidates],['SU-SD-001'] if weak_fact else [])
-                self.assertIn('incoming.topic_billing_payments',result.unresolved_judgments)
-                self.assertEqual(self.storage.calls.count('pending_write'),1)
-
-    def test_source_progress_keeps_same_department_uncertainty_and_uncovered_requested_part(self):
-        from shopunow.incoming import validate_judgments
-        from tests.test_incoming import judgment_answers
-        from typesafe_sdk import ChoiceAnswer
-        self.service.semantic_confidence_trigger=.7
-        other=self.k.KnowledgeRecord.model_validate_json(__import__('json').dumps(source_row(source_id='SU-SD-002',
-            source_question='What information supports a delivery enquiry?')))
-        self.service.catalog[other.source_id]=other
-        text,metadata=self.k.knowledge_payload(other)
-        self.storage.result={name:[self.storage.result[name][0]+[value]] for name,value in (
-            ('ids',other.source_id),('documents',text),('metadatas',metadata))}
-        def relevance(question,candidates,*,timeout):
-            answers=relevance_answers(candidates)
-            if candidates[0].source_kind=='source_descriptor':
-                answers['source_SU_SD_002']=ChoiceAnswer(type='choice',choice='uncertain',confidence=.4,
-                    probabilities={'relevant':.3,'irrelevant':.1,'uncertain':.6})
-            return answers
-        self.models.relevance=relevance
-        answers=judgment_answers()
-        answers['topic_shipping_delivery']['noul']=.57
-        answers['topic_it_support']['noul']=.53
-        answers['topic_billing_payments']['noul']=.99
-        result=self.service.prepare(IncomingDecision('continue',intent='information',
-            destinations=('billing_payments',),proposed_destinations=(
-                'shipping_delivery','billing_payments','it_support'),judgments=validate_judgments(answers)))
-        self.assertEqual(result.destinations,('billing_payments','shipping_delivery'))
-        self.assertEqual([r.source_record_id for r in result.cleared],['SU-SD-001'])
-        self.assertEqual([r.source_record_id for r in result.resolution_candidates],['SU-SD-002'])
-        self.assertIn('billing_payments',result.unresolved_parts)
-        self.assertIn('shipping_delivery',result.unresolved_parts)
-        self.assertIn('incoming.topic_it_support',result.unresolved_judgments)
 
     def test_reviewed_malicious_history_does_not_suppress_independent_current_help(self):
         for verdict,dependency,current,expected in (
@@ -918,76 +756,48 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(self.prepare().kind, 'stopped')
         self.assertEqual(self.storage.calls, [])
 
-    def test_internal_source_labels_refuse_foreign_department_and_handoff_own_department(self):
+    def test_internal_entry_of_another_department_is_never_shown_and_ends_in_a_support_offer(self):
+        # Owner D6 (2026-11-23, RULE-007 known difference): no refusal; the internal entry is never retrieved.
         from shopunow.records import ProfileRecord
         internal=self.k.KnowledgeRecord.model_validate_json(__import__('json').dumps(source_row(
             source_id='SU-HR-010',subject='hr',source_question='What is the internal HR budget?',
             eligible_audience=['employee'],classification='non_general',access_scope='home_department_internal',
             answer_facts=['Never send this internal allocation to a model for classification.'])))
-        self.service.catalog={internal.source_id:internal}
-        profile=dict(record_type='profile',created_at='2026-11-02T10:00:00Z',user_id=USER_ID,
-                     role='employee',home_department='facilities_admin',complete=True,version=1)
-        self.service.profile=ProfileRecord.model_validate_json(__import__('json').dumps(profile))
-        self.service.request.question='What is the internal HR budget?'
-        result=self.service.prepare(IncomingDecision('continue',destinations=('hr',)))
-        self.assertEqual(result.kind,'refusal')
-        self.assertEqual(result.refused_parts,('hr',))
-        self.assertFalse(any(isinstance(call,tuple) and call[0]=='knowledge' for call in self.storage.calls))
-        self.setUp()
-        self.service.catalog={internal.source_id:internal}
-        self.service.profile=ProfileRecord.model_validate_json(__import__('json').dumps({**profile,'home_department':'hr'}))
-        result=self.service.prepare(IncomingDecision('continue',destinations=('hr',)))
-        self.assertEqual(result.kind,'handoff_needed')
-        self.assertEqual(result.handoff_parts,('hr',))
-        self.assertFalse(any(isinstance(call,tuple) and call[0]=='knowledge' for call in self.storage.calls))
+        for home in ('facilities_admin','hr'):  # Another department, and the entry's own department.
+            with self.subTest(home=home):
+                self.setUp()
+                self.service.catalog={internal.source_id:internal}
+                profile=dict(record_type='profile',created_at='2026-11-02T10:00:00Z',user_id=USER_ID,
+                             role='employee',home_department=home,complete=True,version=1)
+                self.service.profile=ProfileRecord.model_validate_json(__import__('json').dumps(profile))
+                self.service.request.question='What is the internal HR budget?'
+                document,labels=self.k.knowledge_payload(internal)
+                # Even if the store returned it despite the general-only filter, code drops it.
+                self.storage.result={'ids':[['SU-HR-010']],'documents':[[document]],'metadatas':[[labels]]}
+                result=self.service.prepare(IncomingDecision('continue',destinations=('hr',)))
+                self.assertEqual(result.kind,'insufficient_evidence')
+                self.assertEqual((result.refused_parts,result.handoff_parts),((),()))
+                self.assertEqual(result.cleared+result.resolution_candidates,())
+                where=next(call[1] for call in self.storage.calls if isinstance(call,tuple) and call[0]=='knowledge')
+                self.assertIn({'classification':'general'},where['$and'])
 
     def test_established_dispositions_survive_rejected_general_context_and_early_exits(self):
-        # Keep model decisions controlled: this tests result handling, not live relevance quality.
-        cases = (
-            ('refusal', ('shipping_delivery',), 'clear', False, (), 'refusal', ('shipping_delivery',), ()),
-            ('handoff', ('shipping_delivery',), 'clear', False, (), 'handoff_needed', (), ('shipping_delivery',)),
-            ('conflict', ('shipping_delivery',), 'clear', False, (), 'insufficient_evidence', ('shipping_delivery',), ('shipping_delivery',)),
-            ('refusal', ('shipping_delivery','billing_payments'), 'clear', False, (), 'insufficient_evidence', ('shipping_delivery',), ()),
-            ('none', ('shipping_delivery',), 'raise', False, ('hr',), 'technical_failure', ('hr',), ()),
-        )
-        for label,destinations,descriptor_kind,history,refused,kind,want_refused,want_handoffs in cases:
-            with self.subTest(label=label,destinations=destinations,descriptor_kind=descriptor_kind,history=history):
-                self.setUp()  # Reuse fresh admitted state and the existing external-boundary doubles.
-                if history:
-                    pending,terminal = transcript_pair()
-                    self.storage.history_rows = terminal
-                    self.storage.header = lambda *args,**kwargs: header_result()
-                    self.storage.events = lambda *args,**kwargs: event_result(pending,terminal)
-                for disposition in ('refusal','handoff'):
-                    if label not in (disposition,'conflict'):
-                        continue
-                    internal = self.k.KnowledgeRecord.model_validate_json(__import__('json').dumps(source_row(
-                        source_id='SU-SD-010' if disposition=='refusal' else 'SU-SD-009',
-                        classification='non_general',
-                        eligible_audience=['employee'] if disposition=='refusal' else ['customer'],
-                        access_scope='home_department_internal' if disposition=='refusal' else 'customer_personal_handoff')))
-                    self.service.catalog[internal.source_id] = internal
+        # Pass 2 (owner 2026-11-23): refusals come only from routing; an empty or failed search keeps them.
+        for relevance_kind,kind in (('insufficient','insufficient_evidence'),('raise','technical_failure')):
+            with self.subTest(relevance_kind=relevance_kind):
+                self.setUp()
                 def relevance(question,candidates,*,timeout):
-                    # Select descriptors, then reject unrelated general excerpts as in the live run.
-                    if descriptor_kind=='raise':
-                        raise TimeoutError('Controlled descriptor provider failure')
-                    if candidates[0].source_kind=='source_descriptor':
-                        return relevance_answers(candidates,*(descriptor_kind,tuple(row.excerpt_id for row in candidates),()))
-                    if candidates[0].source_kind=='owned_history' and label=='handoff':
-                        return relevance_answers(candidates,*('ambiguous',(),()))
+                    if relevance_kind=='raise':
+                        raise TimeoutError('Controlled relevance provider failure')
                     return relevance_answers(candidates,*('insufficient',(),()))
-                self.models.relevance = relevance
-                result = self.service.prepare(IncomingDecision('continue',destinations=destinations,
-                    refused_departments=refused))
+                self.models.relevance=relevance
+                result=self.service.prepare(IncomingDecision('continue',destinations=('shipping_delivery',),
+                    refused_departments=('hr',)))
                 self.assertEqual(result.kind,kind)
-                self.assertEqual(result.refused_parts,want_refused)
-                self.assertEqual(result.handoff_parts,want_handoffs)
+                self.assertEqual(result.refused_parts,('hr',))
+                self.assertEqual(result.handoff_parts,())
                 self.assertEqual(result.pending_message_id,self.storage.pending.message_id)
                 self.assertEqual(result.cleared,())
-                if label=='conflict':
-                    self.assertIn('shipping_delivery',result.unresolved_parts)
-                if 'billing_payments' in destinations:
-                    self.assertIn('billing_payments',result.unresolved_parts)
 
     def test_empty_supplementary_history_preserves_prior_refused_part_and_pending_link(self):
         initial = self.prepare(refused_departments=('hr',))
@@ -1102,19 +912,6 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(result.kind, 'insufficient_evidence')
         self.assertEqual(result.cleared, ())
         self.assertFalse(any(isinstance(c,tuple) and c[0]=='review' for c in self.models.calls))
-
-    def test_returned_source_must_belong_to_descriptor_selected_scope(self):
-        other=self.k.KnowledgeRecord.model_validate_json(__import__('json').dumps(source_row(source_id='SU-SD-002')))
-        self.service.catalog[other.source_id]=other
-        original=self.models.relevance
-        def relevance(question,candidates,*,timeout):
-            if candidates[0].source_kind=='source_descriptor':
-                return relevance_answers(candidates,*('clear',(candidates[0].excerpt_id,),()))
-            return original(question,candidates,timeout=timeout)
-        self.models.relevance=relevance
-        text,metadata=self.k.knowledge_payload(other)
-        self.storage.result={'ids':[[other.source_id]],'documents':[[text]],'metadatas':[[metadata]]}
-        self.assertEqual(self.prepare().kind,'insufficient_evidence')
 
     def test_style_alone_cannot_turn_missing_facts_into_ready_evidence(self):
         self.storage.result={'ids':[[]],'documents':[[]],'metadatas':[[]]}
@@ -1417,4 +1214,4 @@ class EvidenceWorkflowIntegrationTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(observed[0].kind,'ready')
         self.assertEqual(observed[0].cleared[0].source_record_id,'SU-SD-001')
-        self.assertEqual(self.service.budget.attempts,5)  # Jev + source class + embedding + relevance + review.
+        self.assertEqual(self.service.budget.attempts,4)  # Jev + embedding + relevance + review (no entry match).

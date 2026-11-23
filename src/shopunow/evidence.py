@@ -131,7 +131,7 @@ class EvidenceService:
         self._relevance_unresolved=set()  # Matching uncertainty never becomes access permission or factual support.
         self._judgments,self._unresolved_judgments={},[]
         self._resolution_candidates=[]
-        self._pending_sources,self._pending_destinations=set(),set()
+        self._pending_destinations=set()
         self._history_dispositions=[]  # Keep initial and supplementary outcomes; a later lookup cannot erase one.
         self._history_access_ids=set()  # Permission applies to exact reviewed records, not a later history search.
         self._history_subject='allowed'  # Latest code-owned subject decision for recalled employee history.
@@ -140,8 +140,6 @@ class EvidenceService:
         self.routing_models=routing_models  # Routing tie-breaker model (owner 2026-11-23); None: answer models.
         self.on_progress=on_progress  # UI progress step callback (owner 2026-11-23); None: not reported.
         self._routing_attempted=self._candidate_attempted=False
-        self._semantic_sources={}
-        self._descriptor_results={}
         self._semantic_dependency=False
         self._work_timeout=None  # The serialized continuation may impose the earlier specialist cutoff.
 
@@ -151,19 +149,13 @@ class EvidenceService:
         if self.answer_models is None or self._routing_attempted:
             return decision
         self._routing_attempted=True  # Invalid/failed responses consume this opportunity too.
-        descriptors=[{'source_id':row.source_id,'source_question':row.source_question,
-            'subject':row.subject,'audience':list(row.eligible_audience),
-            'classification':row.classification,'access_scope':row.access_scope}
-            for row in self.catalog.values() if self.profile.role in row.eligible_audience]
         payload={'question':self.request.question,'role':self.profile.role,
-            'home_department':self.profile.home_department,'descriptors':descriptors,
+            'home_department':self.profile.home_department,
             'judgments':{key:value.model_dump() for key,value in self._judgments.items()},
             'unresolved_judgments':list(self._unresolved_judgments)}
         raw=self._model((self.routing_models or self.answer_models).resolve_routing,payload)
         resolved=RoutingResolution.model_validate(raw.model_dump() if hasattr(raw,'model_dump') else raw)
-        source_ids=[row.source_id for row in resolved.source_matches]
-        if (resolved.question!=self.request.question or len(source_ids)!=len(set(source_ids))
-                or not set(source_ids)<={row['source_id'] for row in descriptors}
+        if (resolved.question!=self.request.question
                 or len(resolved.destinations)!=len(set(resolved.destinations))):
             raise ValueError('Unbound routing adjudication.')
         self._judgments['semantic.routing']=resolved
@@ -182,14 +174,6 @@ class EvidenceService:
             self._semantic_dependency=True
             self._unresolved_judgments=[key for key in self._unresolved_judgments
                                        if not key.endswith('.department_dependency')]
-        for item in resolved.source_matches:
-            key='descriptors.source_'+item.source_id.replace('-','_')
-            if key in self._judgments and key not in self._unresolved_judgments:
-                continue  # An unrelated resolution cannot rewrite an already settled descriptor.
-            self._semantic_sources[item.source_id]=item.match
-            if item.match!='uncertain':
-                self._pending_sources.discard(item.source_id)
-                self._unresolved_judgments=[value for value in self._unresolved_judgments if value!=key]
         proposed=[]
         for part in resolved.destinations:
             key='incoming.'+('company_wide_topic' if part=='central_support' else 'topic_'+part)
@@ -234,7 +218,6 @@ class EvidenceService:
         candidates=tuple(row for row in result.resolution_candidates if row.clearance=='clean'
             and (row.destination in self.destinations or row.source_kind=='owned_history')
             and (row.source_kind!='owned_history' or row.source_record_id in self._history_access_ids)
-            and row.source_record_id not in self._pending_sources
             and row.destination not in self._pending_destinations)
         if not candidates or 'incoming.intent' in self._unresolved_judgments:
             return result
@@ -269,11 +252,8 @@ class EvidenceService:
         self._resolution_candidates=[row for row in self._resolution_candidates if row.excerpt_id not in decided]
         self._unresolved_judgments=[key for key in self._unresolved_judgments
             if key not in {'knowledge.'+identity for identity in decided}]
-        # Another source in the same department remains an explicit unresolved contribution.
-        pending_parts={'central_support' if self.catalog[key].subject=='company_wide' else self.catalog[key].subject
-                       for key in self._pending_sources if key in self.catalog}
         settled={row.destination for row in candidates} - {
-            row.destination for row in self._resolution_candidates} - pending_parts
+            row.destination for row in self._resolution_candidates}
         self._relevance_unresolved.difference_update(settled)
         factual=any(row.source_kind in ('knowledge','owned_history') for row in self._selected)
         return replace(result,kind='ready' if factual and result.kind!='clarification_needed' else result.kind,
@@ -386,77 +366,6 @@ class EvidenceService:
                 self.tracking.exclude_conversation(self.request.conversation_id)
                 self._event('unverified','pending_write')
 
-    def _classify_sources(self, destinations):
-        descriptors=[]
-        sources={}
-        for record in self.catalog.values():
-            destination='central_support' if record.subject=='company_wide' else record.subject
-            if destination not in destinations:
-                continue
-            identity='source_'+record.source_id.replace('-','_')
-            # Source questions/labels identify the requested class: NEVER send answer facts here.
-            text=record.source_question+'\n'+str({'subject':record.subject,
-                'eligible_audience':record.eligible_audience,'classification':record.classification,
-                'access_scope':record.access_scope})
-            descriptors.append(EvidenceCandidate(identity,'source_descriptor',record.source_id,
-                record.version,text,destination))
-            sources[identity]=record
-        if not descriptors:
-            return {},(),(),()
-        cache_key=tuple(row.excerpt_id for row in descriptors)
-        if cache_key not in self._descriptor_results:
-            self._descriptor_results[cache_key]=self._matching(self.request.question,descriptors,'descriptors')
-        kind,selected,uncertain=self._descriptor_results[cache_key]
-        # Secondary semantic decisions replace only the named descriptor judgments, never their access labels.
-        selected=tuple(row.excerpt_id for row in descriptors if self._semantic_sources.get(row.source_record_id)==
-            'relevant' or (row.source_record_id not in self._semantic_sources and row.excerpt_id in selected))
-        uncertain=tuple(row.excerpt_id for row in descriptors if self._semantic_sources.get(row.source_record_id)==
-            'uncertain' or (row.source_record_id not in self._semantic_sources and row.excerpt_id in uncertain))
-        if kind not in ('clear','insufficient'):
-            raise ValueError('Invalid descriptor matching result.')
-        chosen=self._select(descriptors,selected,uncertain)
-        uncertain_parts=tuple(dict.fromkeys(row.destination for row in descriptors if row.excerpt_id in uncertain))
-        permitted={}
-        refused,handoffs=[],[]
-        for descriptor in chosen:
-            record=sources[descriptor.excerpt_id]
-            disposition=source_disposition(record,role=self.profile.role,department=self.profile.home_department)
-            if disposition=='restricted':
-                refused.append(descriptor.destination)
-            elif disposition=='handoff':
-                handoffs.append(descriptor.destination)
-            else:
-                permitted.setdefault(descriptor.destination,[]).append(record.source_id)
-        if self.semantic_confidence_trigger is not None:
-            for descriptor in descriptors:
-                if descriptor.excerpt_id not in uncertain:
-                    continue
-                record=sources[descriptor.excerpt_id]
-                if source_disposition(record,role=self.profile.role,
-                                      department=self.profile.home_department)=='answerable':
-                    permitted.setdefault(descriptor.destination,[]).append(record.source_id)
-                    self._pending_sources.add(record.source_id)
-            return permitted,tuple(dict.fromkeys(refused)),tuple(dict.fromkeys(handoffs)),uncertain_parts
-        # An uncertain source class may change access/handoff; do not query facts for that destination.
-        permitted={part:ids for part,ids in permitted.items() if part not in uncertain_parts}
-        return permitted,tuple(dict.fromkeys(refused)),tuple(dict.fromkeys(handoffs)),uncertain_parts
-
-    def _finalize_current_sources(self, decision, permitted):
-        # A strong descriptor settles only its source's topic, never intent or factual relevance.
-        stable=tuple(part for part,ids in permitted.items()
-                     if any(identity not in self._pending_sources for identity in ids))
-        resolved_topics={'incoming.company_wide_topic' if part=='central_support'
-                         else 'incoming.topic_'+part for part in stable}
-        self._unresolved_judgments=[key for key in self._unresolved_judgments if key not in resolved_topics]
-        other_uncertainty=any(key.startswith('incoming.') and not (
-            key.startswith('incoming.topic_') or key=='incoming.company_wide_topic')
-            for key in self._unresolved_judgments)
-        if not other_uncertainty:
-            self._pending_destinations.difference_update(stable)
-        # Keep established unsupported parts; absence of a source cannot disprove a requested topic.
-        self.destinations=() if 'incoming.intent' in self._unresolved_judgments else tuple(
-            dict.fromkeys((*decision.destinations,*stable)))
-
     def _knowledge(self, destinations):
         if self.on_progress is not None:
             self.on_progress(3)  # Progress step 3: looking up information.
@@ -464,9 +373,8 @@ class EvidenceService:
         if not destinations:
             return candidates
         vector = self._model(self.models.embed,[self.request.question])[0]
-        for destination,source_ids in destinations.items():
+        for destination in destinations:  # Owner 2026-11-23: the whole department, filtered by code.
             where = knowledge_filter(role=self.profile.role,destination=destination)
-            where['$and'].append({'source_id':{'$in':source_ids}})
             raw = self._read(self.storage.knowledge,vector,where=where,limit=4)
             rows = _rows(raw,query=True)
             if len(rows)>4:
@@ -474,7 +382,7 @@ class EvidenceService:
             for key,text,metadata in rows:
                 record = verify_knowledge(key,text,metadata,catalog=self.catalog,role=self.profile.role,
                     department=self.profile.home_department,destination=destination)
-                if record is not None and key in source_ids:
+                if record is not None:
                     candidates.append(self._candidate(kind='knowledge',key=key,text=text,
                         destination=destination,version=record.version,metadata=metadata,
                         scope={'role':self.profile.role,'destination':destination}))
@@ -612,8 +520,7 @@ class EvidenceService:
         if len(candidates)+len(retained)>20:
             return EvidenceResult('insufficient_evidence',unresolved_parts=tuple(destinations))
         for part in destinations:
-            if sum(row.destination in (part,'history','preference') for row in
-                    retained+candidates)>4:
+            if sum(row.destination==part and row.source_kind=='knowledge' for row in retained+candidates)>4:
                 return EvidenceResult('insufficient_evidence',unresolved_parts=tuple(destinations))
         clean, uncertain = [],set()
         # Across initial and supplementary work, retain a total of at most two ten-ID review batches.
@@ -762,48 +669,34 @@ class EvidenceService:
                 if decision.kind!='continue':
                     return EvidenceResult(decision.kind if decision.kind!='semantic_resolution'
                                           else 'insufficient_evidence')
-            possible=tuple(part for part in decision.proposed_destinations
-                if self.profile.role!='customer' or part not in ('hr','it_support','facilities_admin'))
-            lookups=tuple(dict.fromkeys((*decision.destinations,*(possible if
-                self.semantic_confidence_trigger is not None else ()))))
-            if not lookups and self.semantic_confidence_trigger is not None and self._unresolved_judgments:
-                if self.pending is None:
-                    self._save_pending()
-                self._relevance_unresolved.update(decision.proposed_destinations)
-                return EvidenceResult('insufficient_evidence')  # An unresolved restricted hint grants no facts.
-            if not lookups or len(set(decision.destinations))!=len(decision.destinations):
-                raise ValueError('Invalid validated route.')
             # Validate every scope before any write/model/lookup can begin.
-            for destination in lookups:
+            for destination in decision.destinations:
                 knowledge_filter(role=self.profile.role,destination=destination)
             if self.pending is None:
-                self._save_pending()  # Case discovery already verified this exact pending intent.
+                self._save_pending()
             self.dependency=decision.dependency
             self.destinations=decision.destinations
-            permitted,refused,handoffs,uncertain_parts=self._classify_sources(lookups)
-            if self.answer_models is not None and (uncertain_parts or self._unresolved_judgments):
+            # D4 (owner 2026-11-23): the LLM router runs only when Jev is unsure; it never sees entries.
+            if self.answer_models is not None and self._unresolved_judgments:
                 decision=self._adjudicate_route(decision)
                 if decision.kind!='continue':
                     return EvidenceResult(decision.kind)
                 self.dependency=decision.dependency
                 self.destinations=decision.destinations
-                lookups=tuple(dict.fromkeys((*lookups,*decision.destinations)))
-                for destination in lookups:
-                    knowledge_filter(role=self.profile.role,destination=destination)
-                permitted,refused,handoffs,uncertain_parts=self._classify_sources(lookups)
-            if self.semantic_confidence_trigger is not None:
-                self._finalize_current_sources(decision,permitted)
-            self._relevance_unresolved.update(uncertain_parts)
-            self.refused_parts=tuple(dict.fromkeys((*decision.refused_departments,*refused)))
-            self.handoff_parts=handoffs
+            lookups=self.destinations  # Only settled departments are searched (no weak-topic hints).
+            if len(set(lookups))!=len(lookups):
+                raise ValueError('Invalid validated route.')
+            if not lookups:
+                self._relevance_unresolved.update(decision.proposed_destinations)
+                return EvidenceResult('insufficient_evidence')  # An unsettled hint grants no facts.
+            for destination in lookups:
+                knowledge_filter(role=self.profile.role,destination=destination)
+            if 'incoming.intent' in self._unresolved_judgments:
+                self.destinations=()  # A weak intent keeps rows as resolution context only.
+            self.refused_parts=decision.refused_departments
             if self.dependency!='independent' and self.refused_parts:
                 return EvidenceResult('refusal',refused_parts=self.refused_parts)
-            # Current-source dispositions do not block an independently requested owned-history lookup.
-            if (not permitted and (refused or handoffs) and not uncertain_parts
-                    and not any(row.source_kind=='owned_history' and row.clearance=='clean' for row in self._selected)):
-                return EvidenceResult('refusal' if refused else 'handoff_needed',
-                    refused_parts=self.refused_parts,handoff_parts=handoffs)
-            candidates=self._knowledge(permitted)
+            candidates=self._knowledge(lookups)
             if candidates:
                 kind,selected,uncertain=self._matching(self.request.question,candidates,'knowledge')
                 if kind not in ('clear','insufficient'):
@@ -813,9 +706,8 @@ class EvidenceService:
                 if self.semantic_confidence_trigger is not None:
                     chosen.extend(replace(row,relevance_basis='semantic_resolution') for row in candidates
                                   if row.excerpt_id in uncertain)
-                    chosen=[replace(row,relevance_basis='semantic_resolution') if (
-                        row.source_record_id in self._pending_sources or row.destination in self._pending_destinations
-                        ) else row for row in chosen]
+                    chosen=[replace(row,relevance_basis='semantic_resolution')
+                            if row.destination in self._pending_destinations else row for row in chosen]
                     self._relevance_unresolved.update(row.destination for row in chosen
                                                      if row.relevance_basis=='semantic_resolution')
                 candidates=chosen
@@ -832,7 +724,7 @@ class EvidenceService:
                 result=replace(result,unresolved_parts=tuple(part for part in result.unresolved_parts
                                                              if part not in hints))
             return replace(result,unresolved_parts=tuple(dict.fromkeys(
-                (*result.unresolved_parts,*self.refused_parts,*self.handoff_parts))))
+                (*result.unresolved_parts,*self.refused_parts))))
         except Exception:
             return EvidenceResult('technical_failure')  # No raw exceptions or source text in operational output.
 

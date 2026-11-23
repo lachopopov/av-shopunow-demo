@@ -21,7 +21,6 @@ class ProducerInput:
     part_outcomes: tuple[PartDisposition,...] = ()  # Content-free outcomes of the other requested parts.
     missing_context: str | None = None  # Set only when a resumed producer's search found nothing.
     other_parts: tuple[str,...] = ()  # Other requested parts, answered by other producers, never by this one.
-    own_notes: tuple[str,...] = ()  # Refusal/handoff topics inside this answered part (R4); never their content.
     correction: tuple[str,...] = ()  # Slice 5: final-review defects for this producer; empty outside correction.
     history_owner: bool = False  # Owner 2026-11-23: only this part may request an earlier conversation.
 
@@ -87,7 +86,7 @@ def run_producer(context, *, models, budget, timeout):
             'response_style':context.response_style,'unresolved_parts':list(context.unresolved_parts),
             'dependency':context.dependency,'missing_context':context.missing_context,
             'history_owner':context.history_owner,
-            'other_parts':list(context.other_parts),'own_notes':list(context.own_notes),
+            'other_parts':list(context.other_parts),
             'part_outcomes':[{'part':row.part,'outcome':row.kind} for row in context.part_outcomes],
             'evidence':[{'excerpt_id':row.excerpt_id,'source_kind':row.source_kind,
                 'source_record_id':row.source_record_id,'source_version':row.source_version,
@@ -266,30 +265,15 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
             raise TimeoutError('Production phase ended.')
         return remaining
 
-    # R4: in an independent request, admitted answerable evidence answers its part; a matched restricted or
-    # non-general topic in the same part becomes a note instead of blocking the whole part.
-    noted=frozenset(part for part in (*evidence.refused_parts,*evidence.handoff_parts)
-                    if evidence.dependency=='independent' and part not in evidence.security_fallback_parts
-                    and any(row.source_kind=='knowledge' and row.destination==part for row in evidence.cleared))
-
-    def notes(part):
-        return tuple(dict.fromkeys(row.kind for row in base_dispositions if part in noted and row.part==part
-                                   and row.kind in ('refusal','handoff_needed')))
-
-    def producer_unresolved(part,unresolved):
-        # A noted part is still answered by its own agent; assembly and the draft keep it unresolved.
-        return tuple(other for other in unresolved if not (other==part and part in noted))
-
     def outcomes(part):
         return tuple(row for row in base_dispositions if row.part!=part and row.kind!='supported_answer')
 
     def context_for(part,rows):
         return ProducerInput(request_id,profile.user_id,request.conversation_id,request.question,part,
             tuple(row for row in rows if row.destination in (part,'history','preference')),
-            evidence.response_style,producer_unresolved(part,base_unresolved),dependency=evidence.dependency,
+            evidence.response_style,base_unresolved,dependency=evidence.dependency,
             part_outcomes=outcomes(part),
-            other_parts=tuple(other for other in destinations if other!=part),own_notes=notes(part),
-            history_owner=part==owner)
+            other_parts=tuple(other for other in destinations if other!=part),history_owner=part==owner)
 
     def context_timeout(context,specialist=False):
         remaining=timeout(specialist)
@@ -298,7 +282,7 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
             raise TimeoutError('Recalled context became unresolved.')
         return remaining
 
-    blocked=(set(evidence.refused_parts)|set(evidence.handoff_parts))-noted|set(evidence.security_fallback_parts)
+    blocked=set(evidence.refused_parts)|set(evidence.handoff_parts)|set(evidence.security_fallback_parts)
     # The history owner runs even without evidence, but may then only request history (see factual()).
     owner_may_ask=owner not in blocked and evidence.kind!='clarification_needed'
     eligible=tuple(part for part in destinations if part not in blocked and (part==owner and owner_may_ask or any(
@@ -494,10 +478,9 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
                             row.destination in ('central_support','history'))
                 central=ProducerInput(request_id,profile.user_id,request.conversation_id,request.question,
                     'central_support',tuple(pool.values()),evidence.response_style,
-                    producer_unresolved('central_support',unresolved),frozen,
+                    unresolved,frozen,
                     dependency=evidence.dependency,part_outcomes=outcomes('central_support'),
-                    own_notes=notes('central_support'))
-                central=replace(central,history_owner=owner=='central_support')
+                    history_owner=owner=='central_support')
                 answer=run_producer(central,models=models,budget=budget,timeout=lambda:context_timeout(central))
                 authors=(*(row.part for row in supported),'central_support')
                 if answer.kind!='context_needed' and not factual(central):
@@ -523,7 +506,7 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
                         pool.update((row.excerpt_id,row) for row in extra.cleared
                                     if row.destination in ('central_support','history','preference'))
                         central=replace(central,evidence=tuple(pool.values()),
-                                        unresolved_parts=producer_unresolved('central_support',unresolved))
+                                        unresolved_parts=unresolved)
                         answer=run_producer(central,models=models,budget=budget,
                                             timeout=lambda:context_timeout(central))
                     elif (extra.kind=='insufficient_evidence' and evidence.dependency=='independent'
@@ -533,7 +516,7 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
                                                           or part in earlier_unresolved),'history')))
                         supplementary_dispositions[:]=[row for row in supplementary_dispositions
                                                        if row.part!='central_support']
-                        central=replace(central,unresolved_parts=producer_unresolved('central_support',unresolved),
+                        central=replace(central,unresolved_parts=unresolved,
                                         missing_context=answer.target)
                         answer=run_producer(central,models=models,budget=budget,
                                             timeout=lambda:context_timeout(central))

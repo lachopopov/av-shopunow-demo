@@ -37,7 +37,6 @@ class PrivateWorkflowFixture(IncomingFixture):
         self.restricted_history=self.choice('not_restricted',('restricted','not_restricted','uncertain'))
         self.restricted_sequence=[]  # Optional later subject answers, consumed one per routing call.
         self.history_match='relevant'  # Controlled relevance of owned-history excerpts.
-        self.descriptor_matches={}  # Controlled descriptor labels by source_SU_XX_000 key.
         self.current_match_for=lambda text:self.current_match  # Controlled per-excerpt Knowledge relevance.
         self.candidate_reply=None  # Optional controlled candidate adjudication failure.
         self.boundaries,self.evidence_results,self.producer_calls,self.usage=[],[],[],[]
@@ -71,8 +70,13 @@ class PrivateWorkflowFixture(IncomingFixture):
 
     def query_knowledge(self,vector,*,where,limit,timeout):
         self.storage.calls.append(('knowledge',where))
-        keys=next(item['source_id']['$in'] for item in where['$and'] if 'source_id' in item)
-        rows=[(key,*knowledge.knowledge_payload(self.catalog[key])) for key in keys]
+        # Honour the code-owned department filter like the store does (owner 2026-11-23, challenge M7).
+        def matches(labels):
+            # Each clause is an equality, or {'$contains': role} on the audience list.
+            return all(value['$contains'] in labels.get(key,()) if isinstance(value,dict) else labels.get(key)==value
+                       for clause in where['$and'] for key,value in clause.items())
+        rows=[(key,*payload) for key,payload in ((key,knowledge.knowledge_payload(record))
+              for key,record in self.catalog.items()) if matches(payload[1])][:limit]
         return {'ids':[[row[0] for row in rows]],'documents':[[row[1] for row in rows]],
                 'metadatas':[[row[2] for row in rows]]}
 
@@ -87,8 +91,7 @@ class PrivateWorkflowFixture(IncomingFixture):
         if 'excerpts' in state:
             stage='relevance'
             answers={row['excerpt_id']:self.choice(self.current_match_for(row['text']) if row['source_kind']=='knowledge'
-                else self.history_match if row['source_kind']=='owned_history'
-                else self.descriptor_matches.get(row['excerpt_id'],'relevant'),('relevant','irrelevant','uncertain'))
+                else self.history_match,('relevant','irrelevant','uncertain'))
                 for row in state['excerpts']}
             if 'case_resolution' in body['questions']:
                 answers['case_resolution']=self.choice(self.history_kind,('clear','ambiguous','insufficient'))

@@ -180,38 +180,6 @@ class EvidenceClientTests(unittest.TestCase):
                          {'case_resolution':'ambiguous','e1':'relevant'})
         self.assertEqual(set(self.calls[0]['questions']),{'e1','case_resolution'})
 
-    def test_descriptor_questions_bind_each_target_and_keep_uncertainty_separate(self):
-        # Different source meanings must remain attached to their own judgment after reordering.
-        candidates=(SimpleNamespace(excerpt_id='source_badge',source_kind='source_descriptor',
-            text='How do I report a damaged badge?',destination='facilities_admin'),
-            SimpleNamespace(excerpt_id='source_chair',source_kind='source_descriptor',
-            text='How do I request a chair repair?',destination='facilities_admin'))
-        for ordered in (candidates,candidates[::-1]):
-            with self.subTest(first=ordered[0].excerpt_id):
-                captured=[]
-                def respond(request):
-                    body=json.loads(request.content)
-                    captured.append(body)
-                    labels={'source_badge':'relevant','source_chair':'uncertain','case_resolution':'clear'}
-                    answers={key:{'type':'choice','choice':labels[key],'confidence':1.0,
-                        'probabilities':{name:float(name==labels[key]) for name in value['criteria']}}
-                        for key,value in body['questions'].items()}
-                    return httpx2.Response(200,json={'model':'offline-jev','usage':{},'answers':answers})
-                with TypeSafeClient(api_key='offline-test',retry=RetryPolicy(max_retries=0),
-                                    transport=httpx2.MockTransport(respond)) as client:
-                    models=model_clients.EvidenceModels(jev=client,reviewer=None,embedding=None,jev_model='offline-jev')
-                    result=models.relevance('How should I report my damaged badge?',ordered,timeout=2)
-                body=captured[0]
-                self.assertEqual(set(body['questions']),{'source_badge','source_chair'})
-                for index,row in enumerate(ordered):
-                    instruction=body['questions'][row.excerpt_id]['instructions']
-                    self.assertIn(f'excerpts[{index}]',instruction)
-                    self.assertIn('`question`',instruction)
-                    self.assertIn('source descriptor',instruction)
-                    self.assertEqual(body['state']['excerpts'][index]['excerpt_id'],row.excerpt_id)
-                self.assertEqual({key:value.choice for key,value in result.items()},
-                                 {'source_badge':'relevant','source_chair':'uncertain'})
-
     def test_history_relevance_supplies_verified_relationships_to_global_case_question(self):
         candidates=(SimpleNamespace(excerpt_id='e1',source_kind='owned_history',text='My badge broke.',
             destination='history',conversation_id='owned-conversation',

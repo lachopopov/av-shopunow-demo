@@ -78,7 +78,6 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 await self.employee()
                 fixture=self.recalled_employee_fixture()
                 fixture.restricted_history=answer
-                fixture.descriptor_matches={'source_SU_HR_010':'irrelevant'}
                 await self.post()
                 result=fixture.boundaries[0]
                 self.assertIn(('history',disposition),[(row.part,row.kind) for row in result.dispositions])
@@ -97,7 +96,6 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         fixture=self.recalled_employee_fixture()
         fixture.semantic_confidence_trigger=None  # A caller that does not configure the confidence setting.
         fixture.restricted_history=weak
-        fixture.descriptor_matches={'source_SU_HR_010':'irrelevant'}
         await self.post()
         self.assertTrue(any('restricted_history_subject' in body['questions']
                             for stage,body in fixture.calls if stage=='history_route'))
@@ -110,7 +108,6 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(department=department):
                 await self.employee(department)
                 fixture=self.recalled_employee_fixture()
-                fixture.descriptor_matches={'source_SU_HR_010':'irrelevant'}
                 await self.post()
                 route=next(body for stage,body in fixture.calls if stage=='history_route')
                 self.assertEqual('restricted_history_subject' in route['questions'],asked)
@@ -121,7 +118,6 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         await self.employee()
         fixture=self.recalled_employee_fixture(sources=('SU-HR-010',),topics=('hr',))
         fixture.restricted_history=fixture.choice('restricted',('restricted','not_restricted','uncertain'))
-        fixture.descriptor_matches={'source_SU_HR_010':'irrelevant'}
         await self.post()
         # Owner 2026-11-23: the evidence-less owner may only ask; the denied history never resumes it.
         self.assertEqual(len(fixture.producer_calls),1)
@@ -271,7 +267,6 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.fixture=PrivateWorkflowFixture(self.http.tracking,source_ids=('SU-SD-001','SU-CW-003'))
         self.addCleanup(self.fixture.close)
         self.fixture.answers['company_wide_topic']['noul']=.21
-        self.fixture.descriptor_matches={'source_SU_CW_003':'irrelevant'}
         await self.post()
         result=self.fixture.boundaries[0]
         self.assertEqual(result.kind,'draft_ready')
@@ -335,25 +330,12 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                         fixture.answers['department_dependency']=fixture.choice(dependency,labels)
                         fixture.dependency=dependency
                         fixture.destinations=(main,)
-                        fixture.descriptor_matches={'source_'+sources[1].replace('-','_'):'uncertain'}
                         fixture.routing_matches={} if reply=='omitted' else {sources[1]:reply}
                         await self.post()
                         result=fixture.boundaries[0]
                         self.assertEqual(result.kind,'draft_ready')
                         self.assertNotIn(hint,result.draft.unresolved_parts)
                         self.assertNotIn(hint,[row.part for row in result.dispositions])
-
-    async def test_part_the_adjudicator_routes_stays_unresolved_while_its_source_is_uncertain(self):
-        self.fixture=PrivateWorkflowFixture(self.http.tracking,source_ids=('SU-BP-004','SU-SD-002'))
-        self.addCleanup(self.fixture.close)
-        fixture=self.fixture
-        fixture.answers['topic_shipping_delivery']['noul']=.3
-        fixture.answers['topic_billing_payments']['noul']=1.
-        fixture.destinations=('billing_payments','shipping_delivery')
-        fixture.descriptor_matches={'source_SU_SD_002':'uncertain'}
-        fixture.routing_matches={'SU-SD-002':'uncertain'}
-        await self.post()
-        self.assertIn('shipping_delivery',fixture.boundaries[0].unresolved_parts)
 
     async def test_partly_covered_routed_part_stays_unresolved_and_blocks_dependent_drafts(self):
         labels=('independent','dependent','unclear')
@@ -365,23 +347,14 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 fixture=self.fixture
                 fixture.answers['department_dependency']=fixture.choice(dependency,labels)
                 fixture.dependency=dependency
-                fixture.descriptor_matches={'source_SU_SD_006':'uncertain'}  # One source admitted, one undecided.
-                fixture.routing_matches={'SU-SD-006':'uncertain'}
+                # Challenge T5: one excerpt admitted, the other's Jev relevance is uncertain.
+                undecided=fixture.catalog['SU-SD-006'].answer_facts[0]
+                fixture.current_match_for=lambda text,undecided=undecided:'uncertain' if undecided in text else 'relevant'
+                fixture.admit_candidates=False  # The candidate check does not confirm the uncertain excerpt.
                 await self.post()
                 result=fixture.boundaries[0]
                 self.assertIn('shipping_delivery',result.unresolved_parts)
                 self.assertEqual(result.draft is not None,dependency=='independent')
-
-    async def test_undecided_search_hint_stays_visible_without_a_routing_decision(self):
-        self.fixture=PrivateWorkflowFixture(self.http.tracking,source_ids=('SU-BP-004','SU-SD-002'))
-        self.addCleanup(self.fixture.close)
-        fixture=self.fixture
-        fixture.answers['topic_shipping_delivery']['noul']=.3
-        fixture.answers['topic_billing_payments']['noul']=1.
-        fixture.descriptor_matches={'source_SU_SD_002':'uncertain'}
-        fixture.answer_models=None  # No adjudicator exists, so nothing has settled the hint.
-        await self.post()
-        self.assertIn('shipping_delivery',fixture.evidence_results[0].unresolved_parts)
 
     @staticmethod
     def action_label(confidence):
@@ -617,7 +590,6 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         await self.employee()
         fixture=self.recalled_employee_fixture()
         labels=('restricted','not_restricted','uncertain')
-        fixture.descriptor_matches={'source_SU_HR_010':'irrelevant'}
         fixture.restricted_history=fixture.choice('restricted',labels)
         self.request_context_once('The earlier allocation discussion')
         await self.post()
@@ -701,27 +673,11 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         fixture.destinations=(part,)
         return fixture,part
 
-    async def test_matched_restricted_or_non_general_source_adds_a_note_to_an_answered_part(self):
-        # Owner decision 2026-11-19 (R4): admitted answerable evidence answers the part; the other topic is a note.
-        for role,subject,answerable,others,note in self.PAIRED_SOURCES:
-            for other in others:
-                with self.subTest(role=role,other=other):
-                    fixture,part=await self.paired_source_fixture(role,subject,answerable,other)
-                    await self.post()
-                    result=fixture.boundaries[0]
-                    self.assertEqual(result.kind,'draft_ready')
-                    self.assertIn(part,result.draft.contributor_ids)
-                    self.assertIn((part,note),[(row.part,row.kind) for row in result.dispositions])
-                    self.assertIn(part,result.draft.unresolved_parts)  # R4 review: the noted topic stays visible.
-                    call=next(row for row in fixture.producer_calls if row['part']==part)
-                    self.assertEqual(call['own_notes'],[note])
-                    self.assertNotIn(part,call['unresolved_parts'])  # R4 review: the agent still answers its share.
-                    sources={row['source_record_id'] for row in fixture.producer_calls for row in row['evidence']}
-                    self.assertNotIn(other,sources)  # The restricted or non-general source is never used.
-
-    async def test_part_with_only_a_non_general_or_restricted_source_keeps_its_whole_part_outcome(self):
-        # R4 applies only when answerable evidence was admitted; otherwise the part is refused or handed off as before.
-        for role,subject,_,others,note in (self.PAIRED_SOURCES[1],self.PAIRED_SOURCES[2]):
+    async def test_part_with_only_a_non_general_or_restricted_source_is_an_unsupported_part(self):
+        # Owner D6/L2 (2026-11-23): the source is filtered out of the search, so the part is unsupported
+        # (support offer) rather than refused or handed off; nothing from it reaches a producer.
+        for role,subject,_,others,_note in (self.PAIRED_SOURCES[1],self.PAIRED_SOURCES[2]):
+            note='insufficient_evidence'
             with self.subTest(note=note):
                 fixture=await self.fresh_fixture(source_ids=(others[0],))
                 part='central_support' if subject=='company_wide' else subject
@@ -732,26 +688,18 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 result=fixture.boundaries[0]
                 self.assertIsNone(result.draft)
                 self.assertEqual(result.kind,note)
-                self.assertEqual([(row.part,row.kind) for row in result.dispositions if row.part==part],[(part,note)])
-                self.assertEqual(fixture.producer_calls,[])
+                self.assertIn((part,note),[(row.part,row.kind) for row in result.dispositions])
+                self.assertTrue(all(payload['evidence']==[] for payload in fixture.producer_calls))
 
-    async def test_other_part_with_only_a_non_general_source_stays_handed_off_beside_an_answer(self):
-        # Reachable path for the R4 evidence condition: one part answerable, the other only non-general.
+    async def test_other_part_with_only_a_non_general_source_stays_unsupported_beside_an_answer(self):
+        # One part answerable, the other only non-general (filtered out): that part is unsupported (L3).
         fixture=await self.fresh_fixture(source_ids=('SU-BP-001','SU-SD-008'))
         fixture.answers['topic_billing_payments']['noul']=1.
         fixture.destinations=('billing_payments','shipping_delivery')
         await self.post()
         result=fixture.boundaries[0]
-        self.assertEqual([row.kind for row in result.dispositions if row.part=='shipping_delivery'],['handoff_needed'])
+        self.assertEqual([row.kind for row in result.dispositions if row.part=='shipping_delivery'],['insufficient_evidence'])
         self.assertNotIn('shipping_delivery',[row['part'] for row in fixture.producer_calls])
-
-    async def test_noted_part_reason_check_still_rejects_an_echoed_complete_answer(self):
-        # R4 review: echoing supplied labels must not satisfy the partial-reason rule for a noted part.
-        fixture,part=await self.paired_source_fixture('customer','shipping_delivery','SU-SD-001','SU-SD-008')
-        fixture.producer_hook=lambda payload,reply:reply|{'reason':'The facts are not supported.',
-                                                          'unresolved_parts':list(payload['unresolved_parts'])}
-        await self.post()
-        self.assertEqual(fixture.boundaries[0].kind,'technical_failure')
 
     async def test_partial_answer_may_explain_its_gap_in_reason_without_it_reaching_the_draft(self):
         # Owner decision 2026-11-19 (R4): the live V3 partial-answer shape is accepted; reason stays private.
@@ -780,17 +728,19 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         await self.post()
         self.assertEqual(fixture.boundaries[0].kind,'technical_failure')
 
-    async def test_dependent_request_with_a_matched_restricted_or_non_general_source_is_not_answered(self):
+    async def test_dependent_request_never_receives_a_restricted_or_non_general_source(self):
+        # Owner D6 (2026-11-23): code filters these sources out; only general evidence can reach a producer.
         for role,subject,answerable,others,note in (self.PAIRED_SOURCES[1],self.PAIRED_SOURCES[2]):
             with self.subTest(note=note):
                 fixture,part=await self.paired_source_fixture(role,subject,answerable,others[0])
                 fixture.dependency='dependent'
                 fixture.answers['department_dependency']=fixture.choice('dependent',('independent','dependent','unclear'))
                 await self.post()
-                result=fixture.boundaries[0]
-                self.assertIsNone(result.draft)
-                self.assertIn((part,note),[(row.part,row.kind) for row in result.dispositions])
-                self.assertEqual(fixture.producer_calls,[])
+                hidden=fixture.catalog[others[0]].answer_facts[0]
+                self.assertFalse(any(hidden in row['text'] for payload in fixture.producer_calls
+                                     for row in payload['evidence']))
+                self.assertEqual({row['source_record_id'] for payload in fixture.producer_calls
+                                  for row in payload['evidence'] if row['source_kind']=='knowledge'},{answerable})
 
     async def test_each_specialist_is_told_which_other_parts_other_departments_answer(self):
         # Owner decision 2026-11-19 (R3): a department judges only its own share of a multi-part question.
@@ -809,8 +759,8 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         # R3 review findings 1-2: other parts may be refused or handed off, and a searchable gap still asks first.
         self.assertIn('handled separately; their status, when known, is in part_outcomes',body['instructions'])
         self.assertNotIn('other producers answer them',body['instructions'])
-        # R4: wording only; live compliance is V4 evidence.
-        self.assertIn('own_notes lists topics inside your own part that must not be answered',body['instructions'])
+        # R4 notes removed (owner L1, 2026-11-23).
+        self.assertNotIn('own_notes',body['instructions'])
         self.assertIn('a partial one (own part in unresolved_parts) may give a short reason',body['instructions'])
         # Owner 2026-11-23 (plan §5.2): only the history owner may request an earlier conversation.
         self.assertIn('When history_owner is false, never return context_needed',body['instructions'])
