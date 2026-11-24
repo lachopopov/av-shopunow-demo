@@ -53,10 +53,6 @@ class EvidenceStorage:
         self.calls.append(('knowledge', where))
         return self.result
 
-    def internal_knowledge_page(self, *, offset, timeout):
-        self.calls.append(('internal_knowledge', offset))
-        return {'ids':[], 'documents':[], 'metadatas':[]}  # Pass 4: no internal entries unless a test adds them.
-
     def history_page(self, user_id, *, offset, timeout):
         self.calls.append(('history', user_id, offset))
         return self.history_rows if offset == 0 else {'ids':[], 'documents':[], 'metadatas':[]}

@@ -8,7 +8,7 @@ from math import isfinite, isclose
 from typesafe_sdk import Choice, Noul, NoulCriteria, Score, RetryPolicy
 from langchain_core.runnables import RunnableLambda  # v1.7.2, locked with LangGraph; native fallback composition.
 from shopunow.incoming import (CHOICE_LABELS, IncomingReview, validate_judgments,
-                              HISTORY_ROUTE_FIELDS, HISTORY_SUBJECT_FIELD, validate_history_route)
+                              HISTORY_ROUTE_FIELDS, validate_history_route)
 
 
 def incoming_questions():
@@ -493,7 +493,7 @@ class EvidenceModels:
             raise ValueError('Invalid embedding vector.')
         return vectors
 
-    def history_route(self,question,candidates,*,role,home_department,timeout,restricted_subjects=()):
+    def history_route(self,question,candidates,*,role,home_department,timeout):
         # Case discovery has already passed owner/relevance/security checks; no new permission is inferred.
         if not candidates or any(row.source_kind!='owned_history' or row.clearance!='clean' for row in candidates):
             raise ValueError('History routing requires cleared owned excerpts.')
@@ -506,21 +506,10 @@ class EvidenceModels:
         state={'question':question,'role':role,'home_department':home_department,
                'cleared_history':[{'excerpt_id':row.excerpt_id,'text':row.text,
                                    'conversation_id':row.conversation_id} for row in candidates]}
-        if restricted_subjects:
-            # Only source questions are listed; restricted answer facts never enter this request.
-            state['restricted_subjects']=list(restricted_subjects)
-            questions[HISTORY_SUBJECT_FIELD]=Choice(instructions=(
-                'Does the saved conversation in `cleared_history` concern the same subject as any entry in '
-                '`restricted_subjects`? Judge the subject of the saved conversation, including a refused or '
-                'unanswered question about it. A shared department or general related topic is not enough. '
-                'This judgment grants no permission; application code decides access.'),criteria={
-                    'restricted':'The saved conversation concerns a listed internal subject.',
-                    'not_restricted':'The saved conversation does not concern any listed internal subject.',
-                    'uncertain':'The supplied text does not establish either answer.'})
         response=self.jev.system_one(model=self.jev_model,timeout=timeout,retry=RetryPolicy(max_retries=0),
             state=state,questions=questions)
         self._usage('history_routing',response)
-        return validate_history_route(response.answers,restricted_subject=bool(restricted_subjects))
+        return validate_history_route(response.answers)
 
     def resolve_history_identity(self,question,candidates,*,timeout):
         # Same complete owned pool as Jev; no previous judgments or evaluator hints enter the call.

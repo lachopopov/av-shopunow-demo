@@ -33,8 +33,6 @@ class PrivateWorkflowFixture(IncomingFixture):
         self.history_topic_scores={}  # Optional per-topic scores that replace the shared routed strength.
         self.routing_intent='information'  # Controlled adjudicated intent; None leaves intent unresolved.
         self.semantic_confidence_trigger=.7  # Explicit workflow configuration; None means not configured.
-        self.restricted_history=self.choice('not_restricted',('restricted','not_restricted','uncertain'))
-        self.restricted_sequence=[]  # Optional later subject answers, consumed one per routing call.
         self.history_match='relevant'  # Controlled relevance of owned-history excerpts.
         self.current_match_for=lambda text:self.current_match  # Controlled per-excerpt Knowledge relevance.
         self.candidate_reply=None  # Optional controlled candidate adjudication failure.
@@ -52,8 +50,6 @@ class PrivateWorkflowFixture(IncomingFixture):
         self.storage.write_pending=self.write_pending
         self.storage.exact_pending=self.exact_pending
         self.storage.knowledge=self.query_knowledge
-        self.storage.internal_knowledge_page=self.internal_knowledge_page
-        self.extra_internal,self.internal_pages=(),0  # Pass 4: entries only in (fake) Chroma; pages read.
         self.evidence_models=EvidenceModels(jev=self.jev,reviewer=self.reviewer,embedding=self.reviewer,
             jev_model='offline-jev',observe_response=self.observe_response)
         self.answer_models=AnswerModels(client=self.reviewer,model='controlled-answer',reasoning='low',
@@ -81,15 +77,6 @@ class PrivateWorkflowFixture(IncomingFixture):
         return {'ids':[[row[0] for row in rows]],'documents':[[row[1] for row in rows]],
                 'metadatas':[[row[2] for row in rows]]}
 
-    def internal_knowledge_page(self,*,offset,timeout):
-        # Fake Chroma, one internal entry per page, so the app must read until an empty page (CD-045).
-        self.internal_pages+=1
-        rows=[row for row in (*self.catalog.values(),*self.extra_internal)
-              if row.access_scope=='home_department_internal'][offset:offset+1]
-        payloads=[knowledge.knowledge_payload(row) for row in rows]
-        return {'ids':[row.source_id for row in rows],'documents':[item[0] for item in payloads],
-                'metadatas':[item[1] for item in payloads]}
-
     @staticmethod
     def choice(label,labels):
         return {'type':'choice','choice':label,'confidence':1.,
@@ -107,8 +94,7 @@ class PrivateWorkflowFixture(IncomingFixture):
                 answers['case_resolution']=self.choice(self.history_kind,('clear','ambiguous','insufficient'))
         elif 'cleared_history' in state:
             stage='history_route'
-            answers={key:json.loads(json.dumps(self.answers[key])) for key in body['questions']
-                     if key!='restricted_history_subject'}
+            answers={key:json.loads(json.dumps(self.answers[key])) for key in body['questions']}
             for key in answers:
                 if key.startswith('topic_'):
                     answers[key]['noul']=(self.history_topic_score if key.removeprefix('topic_') in self.history_topics else 0.)
@@ -116,9 +102,6 @@ class PrivateWorkflowFixture(IncomingFixture):
                 answers['topic_'+topic]['noul']=score
             if self.history_company_score is not None:
                 answers['company_wide_topic']['noul']=self.history_company_score
-            if 'restricted_history_subject' in body['questions']:
-                answers['restricted_history_subject']=(self.restricted_sequence.pop(0)
-                    if self.restricted_sequence else self.restricted_history)
         else:
             stage='incoming'
             answers=self.answers
@@ -169,9 +152,13 @@ class PrivateWorkflowFixture(IncomingFixture):
     def observe_response(self,stage,response):
         self.usage.append((stage,response.model,response.usage))
 
-    def history(self,*,foreign=False):
+    def history(self,*,foreign=False,question=None,refused=False):
         # Use existing exact transcript fixtures in a distinct recalled conversation.
-        pending,terminal=transcript_pair()
+        pending,terminal=transcript_pair(kind='completed_refusal' if refused else 'completed_answer')
+        if question is not None:
+            pending['documents']=[question]  # Pass 5: the user's own earlier question.
+        if refused:
+            terminal['documents']=[workflow.REFUSAL_TEXT]  # The fixed refusal text the app saves.
         conversation=str(UUID(int=900))
         for row in (pending,terminal):
             row['metadatas'][0]['conversation_id']=conversation

@@ -106,12 +106,6 @@ class SDKEvidenceRecords(SDKRecords):
             where=where,n_results=limit,include=['metadatas','documents'])
         return self._worker.call(operation,timeout=timeout)
 
-    def internal_knowledge_page(self,*,offset,timeout):
-        # Pass 4: department-internal FAQ entries, read from Chroma (the only FAQ store) one page at a time.
-        self._check_knowledge_configuration()
-        return self._get(self._knowledge_collection,timeout=timeout,offset=offset,limit=100,
-            where={'access_scope':'home_department_internal'})
-
     def history_page(self,user_id,*,offset,timeout):
         return self._get(self._conversations,timeout=timeout,offset=offset,limit=100,
             where={'$and':[{'owner_user_id':user_id},{'record_type':'terminal_outcome'},

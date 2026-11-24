@@ -5,7 +5,7 @@ import json
 from threading import Event
 from unittest import mock
 from uuid import UUID
-from shopunow import knowledge,workflow
+from shopunow import workflow
 from shopunow.evidence import EvidenceService
 from tests.private_workflow_fixture import PrivateWorkflowFixture
 from tests import test_question_http as http_fixtures
@@ -67,79 +67,37 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.http.doCleanups()
         await self.http.asyncSetUp()
 
-    async def test_employee_history_is_released_only_on_a_confident_not_restricted_judgment(self):
-        labels=('restricted','not_restricted','uncertain')
-        weak={'type':'choice','choice':'not_restricted','confidence':.4,
-              'probabilities':{'restricted':.3,'not_restricted':.6,'uncertain':.1}}
-        for name,answer,disposition in (('restricted',PrivateWorkflowFixture.choice('restricted',labels),'refusal'),
-                ('uncertain',PrivateWorkflowFixture.choice('uncertain',labels),'insufficient_evidence'),
-                ('weak',weak,'insufficient_evidence')):
-            with self.subTest(judgment=name):
-                await self.employee()
-                fixture=self.recalled_employee_fixture()
-                fixture.restricted_history=answer
-                await self.post()
-                result=fixture.boundaries[0]
-                self.assertIn(('history',disposition),[(row.part,row.kind) for row in result.dispositions])
-                self.assertTrue(fixture.producer_calls,'Independent current help must still be produced')
-                for payload in fixture.producer_calls:
-                    self.assertEqual({row['source_kind'] for row in payload['evidence']},{'knowledge'})
-                self.assertEqual({row['part'] for row in fixture.producer_calls},{'it_support','central_support'})  # Owner decision 2026-11-19: an unfinished other part sends the answer through synthesis.
-                route=next(body for stage,body in fixture.calls if stage=='history_route')
-                self.assertEqual([row['source_id'] for row in route['state']['restricted_subjects']],['SU-HR-010'])
-                self.assertNotIn(fixture.catalog['SU-HR-010'].answer_facts[0],str(route))
-
-    async def test_employee_restricted_list_is_read_from_chroma_page_by_page(self):
-        # Pass 4 (owner 2026-11-24): Chroma is the only FAQ store; an internal entry held only there is listed.
-        await self.employee()
-        fixture=self.recalled_employee_fixture()
-        fixture.restricted_history=PrivateWorkflowFixture.choice('restricted',('restricted','not_restricted','uncertain'))
-        fixture.extra_internal=(knowledge.KnowledgeRecord.model_validate_json(json.dumps({
-            'source_id':'SU-FA-099','version':'v1','source_question':'What is the facilities move budget?',
-            'answer_facts':['Synthetic internal facilities value.'],'eligible_audience':['employee'],
-            'subject':'facilities_admin','classification':'non_general','access_scope':'home_department_internal',
-            'approval_status':'owner_approved','current_status':'current','synthetic':True})),)
-        await self.post()
-        route=next(body for stage,body in fixture.calls if stage=='history_route')
-        self.assertEqual({row['source_id'] for row in route['state']['restricted_subjects']},{'SU-HR-010','SU-FA-099'})
-        self.assertNotIn('Synthetic internal facilities value.',str(route))  # Questions only, never facts.
-        self.assertEqual(fixture.internal_pages,3)  # Two one-row pages, then the empty page that ends the read.
-
-    async def test_unconfigured_confidence_never_releases_employee_history_on_a_weak_judgment(self):
-        weak={'type':'choice','choice':'not_restricted','confidence':.4,
-              'probabilities':{'restricted':.3,'not_restricted':.6,'uncertain':.1}}
-        await self.employee()
-        fixture=self.recalled_employee_fixture()
-        fixture.semantic_confidence_trigger=None  # A caller that does not configure the confidence setting.
-        fixture.restricted_history=weak
-        await self.post()
-        self.assertTrue(any('restricted_history_subject' in body['questions']
-                            for stage,body in fixture.calls if stage=='history_route'))
-        for payload in fixture.producer_calls:
-            self.assertNotIn('owned_history',[row['source_kind'] for row in payload['evidence']])
-        self.assertIn('history',[row.part for row in fixture.boundaries[0].dispositions])
-
     async def test_employee_may_recall_general_history_and_own_department_subjects(self):
-        for department,asked in (('it_support',True),('hr',False)):
+        for department in ('it_support','hr'):  # Pass 5: no restricted-subject question for any department.
             with self.subTest(department=department):
                 await self.employee(department)
                 fixture=self.recalled_employee_fixture()
                 await self.post()
                 route=next(body for stage,body in fixture.calls if stage=='history_route')
-                self.assertEqual('restricted_history_subject' in route['questions'],asked)
+                self.assertNotIn('restricted_history_subject',route['questions'])
                 self.assertTrue(any(row['source_kind']=='owned_history'
                                     for payload in fixture.producer_calls for row in payload['evidence']))
 
-    async def test_denied_history_alone_never_makes_a_department_eligible_to_answer(self):
+    async def test_another_departments_internal_facts_never_reach_an_employee_writer_through_history(self):
+        # Pass 5 (owner 2026-11-24): no restricted-subject check; saved history holds no internal fact, because
+        # search admits general entries only and a refusal saves fixed text (challenger F4).
         await self.employee()
-        fixture=self.recalled_employee_fixture(sources=('SU-HR-010',),topics=('hr',))
-        fixture.restricted_history=fixture.choice('restricted',('restricted','not_restricted','uncertain'))
+        fixture=self.recalled_employee_fixture()
+        internal=fixture.catalog['SU-HR-010']
+        fixture.history(question=internal.source_question,refused=True)  # An earlier refused internal question.
+        def no_internal_read(**kwargs):
+            raise AssertionError('Internal FAQ entries must not be read.')
+        fixture.storage.internal_knowledge_page=no_internal_read
         await self.post()
-        # Owner 2026-11-23: the evidence-less owner may only ask; the denied history never resumes it.
-        self.assertEqual(len(fixture.producer_calls),1)
-        self.assertEqual(fixture.producer_calls[0]['evidence'],[])
-        self.assertIsNone(fixture.boundaries[0].draft)
-        self.assertIn(('history','refusal'),[(row.part,row.kind) for row in fixture.boundaries[0].dispositions])
+        self.assertTrue(any(row['source_kind']=='owned_history'
+                            for payload in fixture.producer_calls for row in payload['evidence']))
+        self.assertNotIn('history',[row.part for row in fixture.boundaries[0].dispositions])
+        self.assertFalse(any('restricted_history_subject' in body.get('questions',{})
+                             for stage,body in fixture.calls if stage=='history_route'))
+        self.assertNotIn(internal.answer_facts[0],str(fixture.calls))  # Every model request body.
+        searches=[call[1] for call in fixture.storage.calls if isinstance(call,tuple) and call[0]=='knowledge']
+        self.assertTrue(searches)
+        self.assertTrue(all({'classification':'general'} in where['$and'] for where in searches))
 
     async def test_candidate_adjudication_failure_keeps_evidence_already_admitted(self):
         self.fixture=PrivateWorkflowFixture(self.http.tracking,source_ids=('SU-SD-001','SU-SD-006'))
@@ -175,6 +133,7 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
             return reply
         self.fixture.producer_hook=produce
         await self.post()
+        self.assertTrue(self.fixture.producer_calls)  # Challenger F5: an empty run must not pass.
         for payload in self.fixture.producer_calls:
             self.assertEqual({row['source_kind'] for row in payload['evidence']},{'knowledge'})
 
@@ -498,25 +457,6 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(('action','handoff_needed'),[(row.part,row.kind) for row in result.dispositions])
                 self.assertEqual(fixture.producer_calls,[])
 
-    async def test_employee_follow_up_history_needs_a_confident_unrestricted_subject(self):
-        labels=('restricted','not_restricted','uncertain')
-        weak={'type':'choice','choice':'not_restricted','confidence':.65,
-              'probabilities':{'restricted':.2,'not_restricted':.7,'uncertain':.1}}
-        for name,answer,outcome in (('restricted',PrivateWorkflowFixture.choice('restricted',labels),'refusal'),
-                                    ('uncertain',PrivateWorkflowFixture.choice('uncertain',labels),'insufficient_evidence'),
-                                    ('weak',weak,'insufficient_evidence')):
-            with self.subTest(judgment=name):
-                await self.employee('facilities_admin')
-                fixture=self.recalled_employee_fixture(sources=('SU-HR-010','SU-IT-004'),topics=('it_support',))
-                fixture.restricted_history=answer
-                self.request_context_once('The earlier allocation discussion')
-                await self.post()
-                self.assertTrue(any('restricted_history_subject' in body['questions']
-                                    for stage,body in fixture.calls if stage=='history_route'))
-                kinds={row['source_kind'] for payload in fixture.producer_calls for row in payload['evidence']}
-                self.assertEqual(kinds,{'knowledge'})
-                self.assertIn(('history',outcome),[(row.part,row.kind) for row in fixture.boundaries[0].dispositions])
-
     async def test_central_support_resume_keeps_its_earlier_unresolved_status(self):
         self.fixture=PrivateWorkflowFixture(self.http.tracking,source_ids=('SU-SD-001','SU-CW-003'))
         self.addCleanup(self.fixture.close)
@@ -579,7 +519,7 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                                  ['supported_answer'])
                 self.assertNotIn('billing_payments',result.unresolved_parts)
 
-    async def test_confident_unrestricted_employee_history_on_another_topic_is_released(self):
+    async def test_employee_history_on_another_topic_is_released(self):
         await self.employee()
         fixture=self.recalled_employee_fixture(sources=('SU-IT-004',),topics=('it_support',))
         fixture.history_topics=('billing_payments',)  # A general subject outside this request's current route.
@@ -602,13 +542,15 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('shipping_delivery',self.fixture.boundaries[0].draft.unresolved_parts)
 
     async def test_search_finding_only_withheld_history_keeps_the_refusal_outcome(self):
-        await self.employee()
-        fixture=self.recalled_employee_fixture()
-        labels=('restricted','not_restricted','uncertain')
-        fixture.restricted_history=fixture.choice('restricted',labels)
+        # Challenger F3 (Pass 5): a customer case now; withheld history keeps its refusal after the follow-up search.
+        self.fixture.history()
+        self.fixture.history_topic_scores={'hr':1.}
         self.request_context_once('The earlier allocation discussion')
         await self.post()
-        self.assertEqual([row.kind for row in fixture.boundaries[0].dispositions if row.part=='history'],['refusal'])
+        self.assertEqual([row.kind for row in self.fixture.boundaries[0].dispositions if row.part=='history'],['refusal'])
+        self.assertTrue(self.fixture.producer_calls)
+        for payload in self.fixture.producer_calls:
+            self.assertEqual({row['source_kind'] for row in payload['evidence']},{'knowledge'})
 
     @staticmethod
     def unresolved_labels(schema):

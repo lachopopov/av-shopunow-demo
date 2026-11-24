@@ -65,9 +65,6 @@ NOUL_FIELDS = (
     'topic_billing_payments', 'topic_shipping_delivery',
     'prompt_injection', 'sql_injection', 'profile_override_attempt', 'access_concern',
 )
-# One typed access signal: code alone decides whether recalled history may be used.
-HISTORY_SUBJECT_FIELD = 'restricted_history_subject'
-HISTORY_SUBJECT_LABELS = ('restricted', 'not_restricted', 'uncertain')
 # Reuse the existing topic/dependency contract after clean history resolves an unknown subject.
 HISTORY_ROUTE_FIELDS = tuple(key for key in NOUL_FIELDS
                             if key=='company_wide_topic' or key.startswith('topic_')) + ('department_dependency',)
@@ -93,9 +90,9 @@ def validate_judgments(answers):
     return _validate_fields(answers,set(CHOICE_LABELS) | set(NOUL_FIELDS) | {'severity'})
 
 
-def validate_history_route(answers, *, restricted_subject=False):
-    """The post-clearance routing pass, plus the employee subject check when one was asked."""
-    return _validate_fields(answers,set(HISTORY_ROUTE_FIELDS)|({HISTORY_SUBJECT_FIELD} if restricted_subject else set()))
+def validate_history_route(answers):
+    """The post-clearance routing pass over recalled history."""
+    return _validate_fields(answers,set(HISTORY_ROUTE_FIELDS))
 
 
 def _validate_fields(answers,required):
@@ -103,7 +100,7 @@ def _validate_fields(answers,required):
     if not isinstance(answers, dict) or set(answers) != required:
         raise ValueError('Incomplete or unexpected obligatory judgments.')
     checked = {}
-    choices = {**CHOICE_LABELS, HISTORY_SUBJECT_FIELD: HISTORY_SUBJECT_LABELS}
+    choices = CHOICE_LABELS
     for key, raw in answers.items():
         # Revalidate native SDK objects too; constructed instances are not validation proof.
         if isinstance(raw, (ChoiceAnswer, NoulAnswer, ScoreAnswer)):

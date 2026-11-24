@@ -5,8 +5,8 @@ from uuid import UUID, uuid4
 from types import MappingProxyType
 from typing import Literal, Mapping
 from typesafe_sdk import ChoiceAnswer  # Preserve provider-native judgments, not a parallel probability schema.
-from shopunow.incoming import HISTORY_SUBJECT_FIELD, semantic_confident
-from shopunow.knowledge import knowledge_filter, knowledge_record, verify_knowledge, source_disposition
+from shopunow.incoming import semantic_confident
+from shopunow.knowledge import knowledge_filter, verify_knowledge
 from shopunow.records import (PendingMessage, verify_pending_message, verify_terminal_outcome,
     verify_complete_transcript, verify_transcript_events)
 from shopunow.records import verify_owned_conversation_header, HISTORY_EVIDENCE_KINDS
@@ -134,7 +134,6 @@ class EvidenceService:
         self._pending_destinations=set()
         self._history_dispositions=[]  # Keep initial and supplementary outcomes; a later lookup cannot erase one.
         self._history_access_ids=set()  # Permission applies to exact reviewed records, not a later history search.
-        self._history_subject='allowed'  # Latest code-owned subject decision for recalled employee history.
         self._malicious_history_ids=set()  # Only successful per-ID review can establish this exclusion.
         self.answer_models=answer_models  # Explicit opt-in; no normal runtime model is enabled.
         self.routing_models=routing_models  # Routing tie-breaker model (owner 2026-11-23); None: answer models.
@@ -748,10 +747,11 @@ class EvidenceService:
         # Customers: only a weak restricted or currently answered topic can change this access decision.
         guarded={stage+'topic_'+part for part in ('hr','it_support','facilities_admin')}|{
             stage+('company_wide_topic' if part=='central_support' else 'topic_'+part) for part in self.destinations}
-        # The explicit subject check protects employees; customers keep a confident route for what matters.
+        # Employees: saved history holds no internal fact (owner 2026-11-24, Pass 5), so it is released;
+        # customers keep a confident route for what matters (H5, unchanged).
         released=self.profile.role=='employee' or (not guarded.intersection(unsettled) and bool(destinations)
             and (weak_intent or set(destinations)<=set(self.destinations)))
-        if self._history_subject=='allowed' and released and not refused:
+        if released and not refused:
             self._history_access_ids.update(row.source_record_id for row in history)
             return result
         # No partition of shared history by subject exists. Withhold the whole newly selected set.
@@ -759,8 +759,7 @@ class EvidenceService:
         self._selected=[row for row in self._selected if row.excerpt_id not in excluded]
         self._resolution_candidates=[row for row in self._resolution_candidates if row.excerpt_id not in excluded]
         self.refused_parts=tuple(dict.fromkeys((*self.refused_parts,*refused)))
-        self._history_dispositions.append(PartDisposition('history','refusal' if refused or
-            self._history_subject=='restricted' else 'insufficient_evidence'))
+        self._history_dispositions.append(PartDisposition('history','refusal' if refused else 'insufficient_evidence'))
         self._relevance_unresolved.add('history')
         factual=any(row.source_kind in ('knowledge','owned_history') for row in self._selected)
         kind='refusal' if refused and (not factual or dependency!='independent') else (
@@ -773,39 +772,11 @@ class EvidenceService:
         return replace(result,kind=kind,cleared=tuple(self._selected),
             unresolved_parts=tuple(dict.fromkeys((*result.unresolved_parts,*uncovered))))
 
-    def _restricted_history_subjects(self):
-        # Customers are refused by topic; employees need the exact internal subjects closed to them.
-        if self.profile.role!='employee':
-            return ()
-        # Pass 4 (owner 2026-11-24): read from Chroma, the only FAQ store, page by page until an empty page
-        # (CD-045: one-page reads truncated). No cap; the list grows with the internal FAQ entries (known limit).
-        offset,restricted=0,[]
-        while rows := _rows(self._read(self.storage.internal_knowledge_page,offset=offset)):
-            offset+=len(rows)
-            for key,text,metadata in rows:
-                row=knowledge_record(key,text,metadata)
-                if row is None or row.access_scope!='home_department_internal':
-                    raise ValueError('Invalid internal Knowledge entry.')  # Fail closed; never silently skip.
-                if source_disposition(row,role=self.profile.role,department=self.profile.home_department)=='restricted':
-                    restricted.append({'source_id':row.source_id,'subject':row.subject,
-                                       'source_question':row.source_question})
-        return tuple(restricted)
-
     def _historical_access(self,target,history):
         # Routing this exact history is also an authoritative failure boundary, separate from matching.
         try:
-            subjects=self._restricted_history_subjects()
             answers=dict(self._model(self.models.history_route,target,history,
-                role=self.profile.role,home_department=self.profile.home_department,
-                **({'restricted_subjects':subjects} if subjects else {})))
-            subject=answers.pop(HISTORY_SUBJECT_FIELD,None)
-            if subject is not None:
-                self._judgments['history_access.'+HISTORY_SUBJECT_FIELD]=subject
-            # Only a confident negative releases history; every other answer withholds it.
-            self._history_subject=('allowed' if not subjects or (subject is not None and subject.choice=='not_restricted'
-                and self.semantic_confidence_trigger is not None  # Access never treats an unset trigger as confident.
-                and semantic_confident(subject,self.semantic_confidence_trigger)) else
-                'restricted' if subject is not None and subject.choice=='restricted' else 'unclear')
+                role=self.profile.role,home_department=self.profile.home_department))
             recalled=tuple(row.conversation_id for row in self._selected+self._resolution_candidates
                            if row.source_kind=='owned_history')
             if self.tracking.excludes(recalled):
