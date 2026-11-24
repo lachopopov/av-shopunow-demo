@@ -258,6 +258,27 @@ class AppTests(unittest.TestCase):
         self.assertTrue(any(element.key == f'name_{OFFER}' for element in at.text_input))
 
 
+    def test_only_the_newest_handoff_form_is_open_and_older_ones_fold_away(self):
+        # Break caught (owner UX 2026-11-24, option 3): every offer keeps a large open form, cluttering the chat,
+        # or the newest offer's form is hidden where the user is looking.
+        label = 'Request a simulated support handoff'
+        offer_two = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+        self.backend.outcome = {'kind': 'handoff_offer', 'offer_id': OFFER, 'text': 'First offer.'}
+        at = self.chat()
+        at.chat_input(key='question').set_value('I need a person.').run()
+        self.assertEqual([e.proto.expanded for e in at.expander if e.label == label], [True])
+        self.backend.outcome = {'kind': 'handoff_offer', 'offer_id': offer_two, 'text': 'Second offer.'}
+        at.chat_input(key='question').set_value('Another person, please.').run()
+        self.assertEqual([e.proto.expanded for e in at.expander if e.label == label], [False, True])
+        self.assertTrue({f'name_{OFFER}', f'name_{offer_two}'} <= {e.key for e in at.text_input})  # Still usable.
+
+    def test_without_a_conversation_the_page_says_how_to_start_or_reopen_one(self):
+        # Break caught (owner UX 2026-11-24): a blank page gives no hint which sidebar button to use.
+        at = self.signed_in()
+        at.selectbox(key='user_id').select('syn-cust-01').run()
+        self.assertIn("Start a new conversation by clicking the 'New conversation' button on the left, or reopen "
+                      "an earlier one with 'Load my conversations'.", [element.value for element in at.info])
+
     def test_each_reopened_offer_sits_beside_the_answer_it_belongs_to(self):
         # Break caught (challenger 2026-11-21): with two offers, both forms appear at the bottom and the user
         # cannot tell which question each belongs to.
@@ -283,6 +304,7 @@ class AppTests(unittest.TestCase):
         order = [row['text'] for row in at.session_state['transcript']]
         self.assertEqual(order, ['Q1', 'A1', 'Offer one.', 'Q2', 'A2', 'Offer two.', 'The operation failed.'])
         self.assertTrue({f'name_{OFFER}', f'name_{offer_two}'} <= {element.key for element in at.text_input})
+
 
 if __name__ == '__main__':
     unittest.main()

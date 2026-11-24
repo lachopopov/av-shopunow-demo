@@ -182,11 +182,15 @@ if st.session_state.notice:
     kind, text = st.session_state.notice
     getattr(st, kind)(text)
 if st.session_state.conversation_id is None:
-    st.info('Start a new conversation or reopen an earlier one.')
+    st.info("Start a new conversation by clicking the 'New conversation' button on the left, or reopen an earlier "
+            "one with 'Load my conversations'.")  # Owner wording 2026-11-24.
     st.stop()
 
 current = selection()
-for row in api_client.visible(st.session_state.transcript, current):
+rows = api_client.visible(st.session_state.transcript, current)
+# Owner UX 2026-11-24 (option 3): only the newest offer's form starts open; older ones fold away.
+newest_offer = next((row['offer_id'] for row in reversed(rows) if row['offer_id'] is not None), None)
+for row in rows:
     if row['kind'] in ('user', 'assistant'):
         with st.chat_message(row['kind']):
             st.text(row['text'])  # Plain text: model or stored text never renders links or images.
@@ -204,8 +208,8 @@ for row in api_client.visible(st.session_state.transcript, current):
         st.success(f'Simulated support request saved. Receipt: {receipt}. '
                    'No email, call or staff assignment happens in this demo.')
         continue
-    with st.form(key=f'handoff_{offer_id}', border=True):
-        st.markdown('Request a simulated support handoff')
+    with st.expander('Request a simulated support handoff', expanded=offer_id == newest_offer), \
+            st.form(key=f'handoff_{offer_id}', border=False):
         name = st.text_input('Name', key=f'name_{offer_id}', max_chars=200)
         phone = st.text_input('Phone (optional if email given)', key=f'phone_{offer_id}', max_chars=40)
         email = st.text_input('Email (optional if phone given)', key=f'email_{offer_id}', max_chars=254)
