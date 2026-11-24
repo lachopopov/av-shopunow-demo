@@ -23,15 +23,16 @@ class DepartmentSearchTests(unittest.TestCase):
 
     def test_returned_row_outside_the_department_or_not_general_is_dropped(self):
         # Challenge T4: verify_knowledge is the code-side guard behind the store filter.
-        for changes in ({'subject': 'billing_payments'}, {'classification': 'non_general',
-                                                          'access_scope': 'customer_personal_handoff'}):
+        # Pass 4: the hit is checked on its own labels; a label set naming another ID is dropped too.
+        for hit, changes in (('SU-BP-001', {'subject': 'billing_payments'}),
+                             ('SU-BP-001', {'classification': 'non_general', 'access_scope': 'customer_personal_handoff'}),
+                             ('SU-SD-001', {'source_id': 'SU-SD-002'})):
             with self.subTest(changes=changes):
                 self.setUp()
                 other = self.k.KnowledgeRecord.model_validate_json(json.dumps(source_row(
-                    source_id='SU-BP-001', **changes)))
-                self.service.catalog = {'SU-BP-001': other}
+                    **{'source_id': hit, **changes})))
                 document, labels = self.k.knowledge_payload(other)
-                self.storage.result = {'ids': [['SU-BP-001']], 'documents': [[document]], 'metadatas': [[labels]]}
+                self.storage.result = {'ids': [[hit]], 'documents': [[document]], 'metadatas': [[labels]]}
                 result = self.prepare()
                 self.assertEqual(result.cleared, ())
                 self.assertEqual(result.kind, 'insufficient_evidence')  # A support offer, never a refusal.
@@ -40,7 +41,6 @@ class DepartmentSearchTests(unittest.TestCase):
         # Challenge M1: only Knowledge rows count toward the four-per-department cap.
         rows = [self.k.KnowledgeRecord.model_validate_json(json.dumps(source_row(source_id=f'SU-SD-00{n}')))
                 for n in range(1, 5)]
-        self.service.catalog = {row.source_id: row for row in rows}
         payloads = [self.k.knowledge_payload(row) for row in rows]
         self.storage.result = {'ids': [[row.source_id for row in rows]], 'documents': [[p[0] for p in payloads]],
                                'metadatas': [[p[1] for p in payloads]]}
@@ -48,6 +48,15 @@ class DepartmentSearchTests(unittest.TestCase):
         result = self.prepare()
         self.assertEqual(result.kind, 'ready')
         self.assertEqual(len([row for row in result.cleared if row.source_kind == 'knowledge']), 4)
+
+    def test_chroma_hit_absent_from_the_packaged_file_is_answered(self):
+        # Pass 4 (owner 2026-11-24): Chroma is the only FAQ store; the app keeps no second copy to compare with.
+        row = self.k.KnowledgeRecord.model_validate_json(json.dumps(source_row(source_id='SU-SD-099')))
+        document, labels = self.k.knowledge_payload(row)
+        self.storage.result = {'ids': [['SU-SD-099']], 'documents': [[document]], 'metadatas': [[labels]]}
+        result = self.prepare()
+        self.assertEqual(result.kind, 'ready')
+        self.assertEqual([row.source_record_id for row in result.cleared], ['SU-SD-099'])
 
     def test_weak_topic_hint_is_not_searched_without_a_settled_route(self):
         # Pass 2: only settled departments are searched; an unsettled hint costs no search.

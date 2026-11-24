@@ -34,22 +34,23 @@ class KnowledgeTests(unittest.TestCase):
         self.k.prepare_knowledge(source_file(directory, rows), target)
         return target, self.k.load_knowledge(target)
 
-    def test_valid_source_passes_but_changed_text_labels_or_version_never_pass(self):
+    def test_hit_is_checked_on_its_own_labels(self):
+        # Pass 4 (owner 2026-11-24): Chroma is the only FAQ store; a hit is rebuilt and checked on its own labels.
         with TemporaryDirectory() as directory:
             _, catalog = self.prepare(directory, [source_row()])
             document, metadata = self.k.knowledge_payload(catalog['SU-SD-001'])
             self.assertEqual(document,'What is tracking?\nTracking describes synthetic delivery stages.')
-            self.assertEqual(self.k.verify_knowledge('SU-SD-001', document, metadata,
-                catalog=catalog, role='customer', department=None, destination='shipping_delivery').source_id,
-                'SU-SD-001')
-            for field, value in [('version','v2'), ('classification','non_general'),
-                                 ('subject','hr'), ('eligible_audience',['employee'])]:
-                with self.subTest(field=field):
-                    self.assertIsNone(self.k.verify_knowledge('SU-SD-001', document,
-                        {**metadata,field:value}, catalog=catalog, role='customer',
-                        department=None, destination='shipping_delivery'))
-            self.assertIsNone(self.k.verify_knowledge('SU-SD-001', document+' override', metadata,
-                catalog=catalog, role='customer', department=None, destination='shipping_delivery'))
+            check = lambda key, text, labels: self.k.verify_knowledge(key, text, labels, role='customer',
+                department=None, destination='shipping_delivery')
+            self.assertEqual(check('SU-SD-001', document, metadata).source_id, 'SU-SD-001')
+            for field, value in [('classification','non_general'), ('subject','hr'),
+                                 ('eligible_audience',['employee']), ('source_id','SU-SD-002'),
+                                 ('approval_status','draft'), ('synthetic',False), ('extra','label')]:
+                with self.subTest(field=field):  # Inconsistent, foreign or unknown labels never pass.
+                    self.assertIsNone(check('SU-SD-001', document, {**metadata,field:value}))
+            self.assertIsNone(check('SU-SD-001', 'What is tracking?', metadata))  # A question without facts.
+            # Accepted loss (owner 2026-11-24): an edited fact or version in Chroma is used as stored.
+            self.assertEqual(check('SU-SD-001', document+' edited', {**metadata,'version':'v2'}).version, 'v2')
 
     def test_independent_index_and_source_tampering_fail_closed(self):
         with TemporaryDirectory() as directory:

@@ -59,7 +59,7 @@ class ReviewedFixture(PrivateWorkflowFixture):
         self.request_id = request_id
         try:
             self.result = workflow.run_reviewed_workflow(**state, storage=self.storage, tracking=self.tracking,
-                request_id=request_id, catalog=self.catalog, evidence_models=self.evidence_models,
+                request_id=request_id, evidence_models=self.evidence_models,
                 answer_models=self.answer_models, review_models=self.review_models, jev_client=self.jev,
                 reviewer_client=self.reviewer, jev_model='offline-jev', security_trigger=self.security_trigger,
                 topic_trigger=.5, semantic_confidence_trigger=self.semantic_confidence_trigger,
@@ -601,8 +601,7 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
         # evaluated configuration, or the factory skips the reviewed workflow.
         from shopunow import wiring
         fixture = self.fixture
-        admitted = wiring.answering(openai_client=fixture.reviewer, jev_client=fixture.jev,
-                                    catalog=fixture.catalog)(storage=fixture.storage, tracking=fixture.tracking)
+        admitted = wiring.answering(openai_client=fixture.reviewer, jev_client=fixture.jev)(storage=fixture.storage, tracking=fixture.tracking)
         fixture.continue_admitted = admitted
         response = await self.post()
         self.assertEqual(response.json()['outcome']['kind'], 'answer')
@@ -622,8 +621,7 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
         from shopunow import wiring
         fixture = self.fixture
         fixture.answers['topic_shipping_delivery']['noul'] = .6  # Present but uncertain: routing is adjudicated.
-        admitted = wiring.answering(openai_client=fixture.reviewer, jev_client=fixture.jev,
-                                    catalog=fixture.catalog)(storage=fixture.storage, tracking=fixture.tracking)
+        admitted = wiring.answering(openai_client=fixture.reviewer, jev_client=fixture.jev)(storage=fixture.storage, tracking=fixture.tracking)
         fixture.continue_admitted = admitted
         response = await self.post()
         self.assertEqual(response.json()['outcome']['kind'], 'answer')
@@ -647,7 +645,7 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
             def clear(self, user_id, conversation_id):
                 seen.append('cleared')
-        admitted = wiring.answering(openai_client=fixture.reviewer, jev_client=fixture.jev, catalog=fixture.catalog,
+        admitted = wiring.answering(openai_client=fixture.reviewer, jev_client=fixture.jev,
                                     progress=Recorder())(storage=fixture.storage, tracking=fixture.tracking)
         fixture.continue_admitted = admitted
         response = await self.post()

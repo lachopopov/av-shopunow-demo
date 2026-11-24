@@ -68,7 +68,7 @@ class ProductionWorkflowTests(unittest.TestCase):
                 raise AssertionError('Admitted late child was not released')
             return self.produce(payload,timeout=timeout)
         def continuation(**state):
-            service=EvidenceService(storage=self.service.storage,catalog=self.service.catalog,
+            service=EvidenceService(storage=self.service.storage,
                 models=self.fixture.models,tracking=owner.tracking,request_id=REQUEST_ID,
                 created_at='2026-11-16T10:00:00Z',budget=ModelBudget(),topic_trigger=.5,**state)
             evidence=service.prepare(IncomingDecision('continue',destinations=('shipping_delivery',),intent='information'))

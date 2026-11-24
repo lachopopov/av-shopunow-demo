@@ -5,7 +5,7 @@ import json
 from threading import Event
 from unittest import mock
 from uuid import UUID
-from shopunow import workflow
+from shopunow import knowledge,workflow
 from shopunow.evidence import EvidenceService
 from tests.private_workflow_fixture import PrivateWorkflowFixture
 from tests import test_question_http as http_fixtures
@@ -88,6 +88,22 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 route=next(body for stage,body in fixture.calls if stage=='history_route')
                 self.assertEqual([row['source_id'] for row in route['state']['restricted_subjects']],['SU-HR-010'])
                 self.assertNotIn(fixture.catalog['SU-HR-010'].answer_facts[0],str(route))
+
+    async def test_employee_restricted_list_is_read_from_chroma_page_by_page(self):
+        # Pass 4 (owner 2026-11-24): Chroma is the only FAQ store; an internal entry held only there is listed.
+        await self.employee()
+        fixture=self.recalled_employee_fixture()
+        fixture.restricted_history=PrivateWorkflowFixture.choice('restricted',('restricted','not_restricted','uncertain'))
+        fixture.extra_internal=(knowledge.KnowledgeRecord.model_validate_json(json.dumps({
+            'source_id':'SU-FA-099','version':'v1','source_question':'What is the facilities move budget?',
+            'answer_facts':['Synthetic internal facilities value.'],'eligible_audience':['employee'],
+            'subject':'facilities_admin','classification':'non_general','access_scope':'home_department_internal',
+            'approval_status':'owner_approved','current_status':'current','synthetic':True})),)
+        await self.post()
+        route=next(body for stage,body in fixture.calls if stage=='history_route')
+        self.assertEqual({row['source_id'] for row in route['state']['restricted_subjects']},{'SU-HR-010','SU-FA-099'})
+        self.assertNotIn('Synthetic internal facilities value.',str(route))  # Questions only, never facts.
+        self.assertEqual(fixture.internal_pages,3)  # Two one-row pages, then the empty page that ends the read.
 
     async def test_unconfigured_confidence_never_releases_employee_history_on_a_weak_judgment(self):
         weak={'type':'choice','choice':'not_restricted','confidence':.4,

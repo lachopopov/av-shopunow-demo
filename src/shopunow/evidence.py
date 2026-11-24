@@ -6,7 +6,7 @@ from types import MappingProxyType
 from typing import Literal, Mapping
 from typesafe_sdk import ChoiceAnswer  # Preserve provider-native judgments, not a parallel probability schema.
 from shopunow.incoming import HISTORY_SUBJECT_FIELD, semantic_confident
-from shopunow.knowledge import knowledge_filter, verify_knowledge, source_disposition
+from shopunow.knowledge import knowledge_filter, knowledge_record, verify_knowledge, source_disposition
 from shopunow.records import (PendingMessage, verify_pending_message, verify_terminal_outcome,
     verify_complete_transcript, verify_transcript_events)
 from shopunow.records import verify_owned_conversation_header, HISTORY_EVIDENCE_KINDS
@@ -109,14 +109,14 @@ class EvidenceService:
     The result is an internal producer-input boundary. No HTTP success, terminal write,
     producer generation, or live enablement is supplied by this component.
     """
-    def __init__(self, *, storage, catalog, models, attempt, tracking, request, profile,
+    def __init__(self, *, storage, models, attempt, tracking, request, profile,
                  transcript, request_id, created_at, budget, uuid_factory=uuid4,topic_trigger=None,
                  semantic_confidence_trigger=None,history_identity_resolver=None,answer_models=None,
                  routing_models=None,on_progress=None):
         if (tracking is not attempt._hold_tracking or request.user_id != profile.user_id
                 or str(UUID(request.conversation_id)) != attempt._hold_id):
             raise ValueError('Evidence must retain admitted identity and tracking.')
-        self.storage, self.catalog, self.models = storage, catalog, models
+        self.storage, self.models = storage, models
         self.attempt, self.tracking, self.request, self.profile = attempt, tracking, request, profile
         self.transcript, self.request_id, self.created_at = transcript, str(UUID(request_id)), created_at
         self.budget, self.uuid_factory = budget, uuid_factory
@@ -230,10 +230,7 @@ class EvidenceService:
                 'clearance':row.clearance,'relevance_basis':row.relevance_basis,
                 # Detach existing verified mappings into JSON-compatible native input, without new authority.
                 'returned_metadata':dict(row.returned_metadata or {}),
-                'retrieval_scope':dict(row.retrieval_scope or {}),
-                # Reuse the approved source schema and omit its separate facts, already bounded by this excerpt.
-                'source_descriptor':self.catalog[row.source_record_id].model_dump(mode='json',
-                    exclude={'answer_facts'}) if row.source_kind=='knowledge' else None} for row in candidates]}
+                'retrieval_scope':dict(row.retrieval_scope or {})} for row in candidates]}
         raw=self._model(self.answer_models.resolve_candidates,payload)
         resolved=CandidateResolution.model_validate(raw.model_dump() if hasattr(raw,'model_dump') else raw)
         status=resolved.outcome.status
@@ -378,7 +375,7 @@ class EvidenceService:
             if len(rows)>4:
                 raise ValueError('Knowledge response exceeds requested bound.')
             for key,text,metadata in rows:
-                record = verify_knowledge(key,text,metadata,catalog=self.catalog,role=self.profile.role,
+                record = verify_knowledge(key,text,metadata,role=self.profile.role,
                     department=self.profile.home_department,destination=destination)
                 if record is not None:
                     candidates.append(self._candidate(kind='knowledge',key=key,text=text,
@@ -780,9 +777,19 @@ class EvidenceService:
         # Customers are refused by topic; employees need the exact internal subjects closed to them.
         if self.profile.role!='employee':
             return ()
-        return tuple({'source_id':row.source_id,'subject':row.subject,'source_question':row.source_question}
-            for row in self.catalog.values() if row.access_scope=='home_department_internal'
-            and source_disposition(row,role=self.profile.role,department=self.profile.home_department)=='restricted')
+        # Pass 4 (owner 2026-11-24): read from Chroma, the only FAQ store, page by page until an empty page
+        # (CD-045: one-page reads truncated). No cap; the list grows with the internal FAQ entries (known limit).
+        offset,restricted=0,[]
+        while rows := _rows(self._read(self.storage.internal_knowledge_page,offset=offset)):
+            offset+=len(rows)
+            for key,text,metadata in rows:
+                row=knowledge_record(key,text,metadata)
+                if row is None or row.access_scope!='home_department_internal':
+                    raise ValueError('Invalid internal Knowledge entry.')  # Fail closed; never silently skip.
+                if source_disposition(row,role=self.profile.role,department=self.profile.home_department)=='restricted':
+                    restricted.append({'source_id':row.source_id,'subject':row.subject,
+                                       'source_question':row.source_question})
+        return tuple(restricted)
 
     def _historical_access(self,target,history):
         # Routing this exact history is also an authoritative failure boundary, separate from matching.

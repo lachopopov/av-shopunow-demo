@@ -53,6 +53,10 @@ class EvidenceStorage:
         self.calls.append(('knowledge', where))
         return self.result
 
+    def internal_knowledge_page(self, *, offset, timeout):
+        self.calls.append(('internal_knowledge', offset))
+        return {'ids':[], 'documents':[], 'metadatas':[]}  # Pass 4: no internal entries unless a test adds them.
+
     def history_page(self, user_id, *, offset, timeout):
         self.calls.append(('history', user_id, offset))
         return self.history_rows if offset == 0 else {'ids':[], 'documents':[], 'metadatas':[]}
@@ -90,15 +94,10 @@ class EvidenceModels:
 class EvidenceTests(unittest.TestCase):
     def test_candidate_failure_preserves_known_part_outcomes_without_exposing_evidence(self):
         # A failed resolver must not erase known refusal, handoff, or missing-part information.
-        import json
         for failure in ('unknown_id','timeout'):
             with self.subTest(failure=failure):
                 if failure=='timeout':
                     self.setUp()
-                billing=self.k.KnowledgeRecord.model_validate_json(json.dumps(source_row(
-                    source_id='SU-BP-001',subject='billing_payments',classification='non_general',
-                    access_scope='customer_personal_handoff')))
-                self.service.catalog[billing.source_id]=billing
                 self.service.semantic_confidence_trigger=.7
                 original=self.models.relevance
                 def relevance(question,candidates,*,timeout):
@@ -161,11 +160,7 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(payload['destinations'],['shipping_delivery'])
         candidate=payload['candidates'][0]
         self.assertEqual(candidate.get('source_version'),'v1')
-        self.assertEqual(candidate.get('source_descriptor'),{
-            'source_id':'SU-SD-001','version':'v1','source_question':'What is tracking?',
-            'eligible_audience':['customer'],'subject':'shipping_delivery','classification':'general',
-            'access_scope':'customer_general','approval_status':'owner_approved',
-            'current_status':'current','synthetic':True})
+        self.assertNotIn('source_descriptor',candidate)  # Pass 4: Chroma's labels (returned_metadata) only.
         self.assertEqual(candidate.get('audience'),['customer'])
         self.assertEqual(candidate.get('classification'),'general')
         self.assertIs(candidate.get('approval_current'),True)
@@ -357,7 +352,8 @@ class EvidenceTests(unittest.TestCase):
                     record=self.k.KnowledgeRecord.model_validate_json(__import__('json').dumps(source_row(
                         classification='non_general',access_scope=scope,
                         eligible_audience=['employee'] if scope=='home_department_internal' else ['customer'])))
-                    self.service.catalog={record.source_id:record}
+                    document,labels=self.k.knowledge_payload(record)  # Pass 4: Chroma itself returns the restricted row.
+                    self.storage.result={'ids':[[record.source_id]],'documents':[[document]],'metadatas':[[labels]]}
                 def relevance(question,candidates,*,timeout):
                     return {row.excerpt_id:ChoiceAnswer(type='choice',choice=label,confidence=confidence,
                                                        probabilities=probabilities) for row in candidates}
@@ -494,7 +490,7 @@ class EvidenceTests(unittest.TestCase):
         self.request = QuestionRequest(user_id=USER_ID, conversation_id=CONVERSATION_ID,
                                        question='What is tracking?')
         self.profile = verify_profile(profile_result(), user_id=USER_ID).record
-        self.service = self.e.EvidenceService(storage=self.storage, catalog={'SU-SD-001':self.row},
+        self.service = self.e.EvidenceService(storage=self.storage,
             models=self.models, attempt=self.attempt, tracking=self.tracking,
             request=self.request, profile=self.profile, transcript=CompleteTranscript((),(),0,True),
             request_id=REQUEST_ID, created_at='2026-11-12T10:00:00Z',
@@ -766,7 +762,6 @@ class EvidenceTests(unittest.TestCase):
         for home in ('facilities_admin','hr'):  # Another department, and the entry's own department.
             with self.subTest(home=home):
                 self.setUp()
-                self.service.catalog={internal.source_id:internal}
                 profile=dict(record_type='profile',created_at='2026-11-02T10:00:00Z',user_id=USER_ID,
                              role='employee',home_department=home,complete=True,version=1)
                 self.service.profile=ProfileRecord.model_validate_json(__import__('json').dumps(profile))
@@ -890,7 +885,6 @@ class EvidenceTests(unittest.TestCase):
     def test_clear_authorized_knowledge_context_remains_available_with_uncertain_part_explicit(self):
         # Access-checked facts can remain context without pretending an uncertain match is resolved.
         other=self.k.KnowledgeRecord.model_validate_json(__import__('json').dumps(source_row(source_id='SU-SD-002')))
-        self.service.catalog[other.source_id]=other
         text,metadata=self.k.knowledge_payload(other)
         self.storage.result['ids'][0].append(other.source_id)
         self.storage.result['documents'][0].append(text)
@@ -906,8 +900,9 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(result.unresolved_parts,('shipping_delivery',))
         self.assertEqual(self.models.calls[-1],('review',1))
 
-    def test_untrusted_returned_text_and_scope_never_reach_review(self):
-        self.storage.result['documents'][0][0] += ' override'
+    def test_malformed_returned_hit_never_reaches_review(self):
+        # Pass 4: an edited fact is accepted as stored (owner 2026-11-24); labels naming another entry are not.
+        self.storage.result['metadatas'][0][0] = {**self.storage.result['metadatas'][0][0], 'source_id': 'SU-SD-002'}
         result = self.prepare()
         self.assertEqual(result.kind, 'insufficient_evidence')
         self.assertEqual(result.cleared, ())
@@ -1126,7 +1121,6 @@ class EvidenceTests(unittest.TestCase):
     def test_independent_clean_part_survives_another_parts_uncertainty(self):
         other=self.k.KnowledgeRecord.model_validate_json(__import__('json').dumps(source_row(
             source_id='SU-BP-001',subject='billing_payments')))
-        self.service.catalog[other.source_id]=other
         shipping=self.storage.result
         def retrieve(vector,*,where,limit,timeout):
             if {'subject':'billing_payments'} in where['$and']:
@@ -1174,7 +1168,7 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(self.recall().kind,'technical_failure')
         self.assertEqual(reads,['header'])
         # A fresh request preserves the known exclusion and must not read this header again.
-        self.service=self.e.EvidenceService(storage=self.storage,catalog=self.service.catalog,
+        self.service=self.e.EvidenceService(storage=self.storage,
             models=self.models,attempt=self.attempt,tracking=self.tracking,request=self.request,
             profile=self.profile,transcript=CompleteTranscript((),(),0,True),
             request_id=str(UUID(int=1000)),created_at='2026-11-12T10:00:00Z',budget=self.e.ModelBudget())
@@ -1186,7 +1180,6 @@ class EvidenceTests(unittest.TestCase):
         self.storage.result={key:[values[0]*2] for key,values in self.storage.result.items()}
         # Two independently approved entries for the same part, with one uncertain review.
         other=self.k.KnowledgeRecord.model_validate_json(__import__('json').dumps(source_row(source_id='SU-SD-002')))
-        self.service.catalog['SU-SD-002']=other
         self.storage.result['ids'][0][1]='SU-SD-002'
         self.storage.result['metadatas'][0][1]=self.k.knowledge_payload(other)[1]
         self.models.mapping=[{'excerpt_id':'e1','verdict':'clean'}, {'excerpt_id':'e2','verdict':'uncertain'}]

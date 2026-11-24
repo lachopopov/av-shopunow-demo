@@ -129,7 +129,7 @@ def run_seam(case_id, *, run_dir, inner=None):
         response = complete_reviewed(result, request=request, profile=profile, attempt=attempt, storage=storage,
             review_models=AnswerModels(client=client, model=REVIEW_MODEL, reasoning=REVIEW_REASONING),
             answer_models=AnswerModels(client=client, model=ANSWER_MODEL, reasoning=ANSWER_REASONING),
-            tracking=tracking, request_id=request_id, model_budget=ModelBudget(), catalog=None,
+            tracking=tracking, request_id=request_id, model_budget=ModelBudget(),
             evidence_models=None, transcript=None, utc_now=lambda: moment)
     except Exception as error:  # Type only: messages may carry private text.
         failure = type(error).__name__

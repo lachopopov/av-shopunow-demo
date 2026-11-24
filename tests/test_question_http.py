@@ -181,7 +181,7 @@ class QuestionHTTPTests(unittest.IsolatedAsyncioTestCase):
                 'model':'offline-jev','usage':{},'answers':answers}))) as client:
             def continuation(*,request_id,**state):
                 budget=ModelBudget()
-                service=EvidenceService(**state,storage=storage,catalog=catalog,models=models,
+                service=EvidenceService(**state,storage=storage,models=models,
                     tracking=self.tracking,request_id=request_id,created_at='2026-11-12T10:00:00Z',budget=budget)
                 return run_incoming(**state,storage=storage,tracking=self.tracking,request_id=request_id,
                     jev_client=client,reviewer_client=None,jev_model='offline-jev',security_trigger=.7,

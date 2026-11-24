@@ -120,21 +120,29 @@ def knowledge_filter(*, role, destination):
         {'eligible_audience': {'$contains': role}}, {'subject': subject}, {'classification': 'general'}]}
 
 
-def verify_knowledge(record_id, text, metadata, *, catalog, role, department, destination):
-    expected = catalog.get(record_id)
-    if expected is None:
+def knowledge_record(record_id, text, metadata):
+    """Rebuild one FAQ record from a Chroma hit (owner 2026-11-24: Chroma is the only FAQ store)."""
+    if type(text) is not str or type(metadata) is not dict or metadata.get('source_id') != record_id:
         return None
-    document, labels = knowledge_payload(expected)
+    question, *facts = text.split('\n')  # knowledge_payload: question line, then one line per fact.
+    try:  # JSON mode: Chroma's lists fit the strict tuple fields; the same label rules apply.
+        return KnowledgeRecord.model_validate_json(json.dumps(
+            {**metadata, 'source_question': question, 'answer_facts': facts}))
+    except ValueError:
+        return None
+
+
+def verify_knowledge(record_id, text, metadata, *, role, department, destination):
+    record = knowledge_record(record_id, text, metadata)
     subject = 'company_wide' if destination == 'central_support' else destination
-    if (type(metadata) is not dict or json.dumps(metadata,sort_keys=True) != json.dumps(labels,sort_keys=True)
-            or text != document
-            or expected.subject != subject or
-            source_disposition(expected, role=role, department=department) != 'answerable'):
+    if (record is None or record.subject != subject
+            or source_disposition(record, role=role, department=department) != 'answerable'):
         return None
-    return expected  # Equality is against the independently packaged source, never the hit itself.
+    return record  # Checked on the hit's own labels; no packaged copy is compared.
 
 
-# Flow: explicit approved-source preparation -> independent deployed index -> scoped returned-hit check.
+# Flow: explicit approved-source preparation -> Chroma upload (index_knowledge) -> each returned hit rebuilt
+# and checked on its own labels (schema, department, role access).
 
 
 def index_knowledge(*, catalog, storage, models, account_check, timeout):

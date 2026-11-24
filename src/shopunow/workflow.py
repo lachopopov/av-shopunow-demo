@@ -221,7 +221,7 @@ def run_incoming(*, request, profile, transcript, attempt, tracking, storage, re
 
 
 def run_private_workflow(*,request,profile,transcript,attempt,tracking,storage,request_id,
-                         catalog,evidence_models,answer_models,jev_client,reviewer_client,jev_model,
+                         evidence_models,answer_models,jev_client,reviewer_client,jev_model,
                          security_trigger=None,topic_trigger=None,semantic_confidence_trigger=None,
                          history_identity_resolver=None,fallback_reviewer_client=None,model_budget=None,
                          observe_evidence=None,observe_result=None,observe_response=None,utc_now=None,
@@ -264,7 +264,7 @@ def run_private_workflow(*,request,profile,transcript,attempt,tracking,storage,r
         options={} if uuid_factory is None else {'uuid_factory':uuid_factory}
         service=EvidenceService(request=request,profile=profile,transcript=transcript,attempt=attempt,
             tracking=tracking,storage=storage,request_id=request_id,created_at=now().isoformat(),
-            catalog=catalog,models=evidence_models,answer_models=answer_models,routing_models=routing_models,on_progress=on_progress,budget=budget,
+            models=evidence_models,answer_models=answer_models,routing_models=routing_models,on_progress=on_progress,budget=budget,
             topic_trigger=topic_trigger,semantic_confidence_trigger=semantic_confidence_trigger,
             history_identity_resolver=history_identity_resolver,**options)
         evidence=service.prepare(decision)  # Exact pending verification precedes retrieval and generation.
@@ -373,7 +373,7 @@ def complete_reviewed(result, *, review_models, **options):
                                            'insufficient_evidence'):
         # Gate outcome: the question was never saved, so save and exact-verify it first (write if missing).
         from shopunow.evidence import EvidenceService
-        pending = EvidenceService(storage=storage, catalog=options['catalog'], models=options['evidence_models'],
+        pending = EvidenceService(storage=storage, models=options['evidence_models'],
             attempt=attempt, tracking=tracking, request=request, profile=profile,
             transcript=options['transcript'], request_id=request_id, created_at=now, budget=budget).save_pending()
     if pending is None or tracking.excludes((request.conversation_id,)):

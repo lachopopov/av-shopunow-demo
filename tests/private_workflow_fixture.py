@@ -52,6 +52,8 @@ class PrivateWorkflowFixture(IncomingFixture):
         self.storage.write_pending=self.write_pending
         self.storage.exact_pending=self.exact_pending
         self.storage.knowledge=self.query_knowledge
+        self.storage.internal_knowledge_page=self.internal_knowledge_page
+        self.extra_internal,self.internal_pages=(),0  # Pass 4: entries only in (fake) Chroma; pages read.
         self.evidence_models=EvidenceModels(jev=self.jev,reviewer=self.reviewer,embedding=self.reviewer,
             jev_model='offline-jev',observe_response=self.observe_response)
         self.answer_models=AnswerModels(client=self.reviewer,model='controlled-answer',reasoning='low',
@@ -78,6 +80,15 @@ class PrivateWorkflowFixture(IncomingFixture):
               for key,record in self.catalog.items()) if matches(payload[1])][:limit]
         return {'ids':[[row[0] for row in rows]],'documents':[[row[1] for row in rows]],
                 'metadatas':[[row[2] for row in rows]]}
+
+    def internal_knowledge_page(self,*,offset,timeout):
+        # Fake Chroma, one internal entry per page, so the app must read until an empty page (CD-045).
+        self.internal_pages+=1
+        rows=[row for row in (*self.catalog.values(),*self.extra_internal)
+              if row.access_scope=='home_department_internal'][offset:offset+1]
+        payloads=[knowledge.knowledge_payload(row) for row in rows]
+        return {'ids':[row.source_id for row in rows],'documents':[item[0] for item in payloads],
+                'metadatas':[item[1] for item in payloads]}
 
     @staticmethod
     def choice(label,labels):
@@ -186,7 +197,7 @@ class PrivateWorkflowFixture(IncomingFixture):
             self.observer_hook(result)
         try:
             self.result=workflow.run_private_workflow(**state,storage=self.storage,tracking=self.tracking,
-                request_id=request_id,catalog=self.catalog,evidence_models=self.evidence_models,
+                request_id=request_id,evidence_models=self.evidence_models,
                 answer_models=self.answer_models,jev_client=self.jev,reviewer_client=self.reviewer,
                 jev_model='offline-jev',security_trigger=self.security_trigger,topic_trigger=.5,semantic_confidence_trigger=self.semantic_confidence_trigger,
                 model_budget=self.budget,observe_response=self.observe_response,

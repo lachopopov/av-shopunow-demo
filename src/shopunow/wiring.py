@@ -1,6 +1,5 @@
 # Python 3.12 / OpenAI 3.46.0 / TypeSafe SDK 0.7.5; Slice 6 wiring for the served answer route.
 # One factory turns two provider clients into the admitted reviewed workflow (CD-094, CD-099).
-from shopunow.knowledge import load_knowledge  # Packaged approved Knowledge catalog (no provider calls).
 from shopunow.model_clients import AnswerModels, EvidenceModels  # Existing thin typed adapters.
 from shopunow.workflow import run_reviewed_workflow  # Slice 5 composer: review, save, read back, deliver.
 
@@ -16,13 +15,13 @@ ROUTING_MODEL, ROUTING_REASONING = 'gpt-6.1-sol', 'low'  # Routing tie-breaker (
 # embeddings (text-embedding-3-small) and the 5 process-wide model slots are the adapters' own defaults.
 
 
-def answering(*, openai_client, jev_client, catalog=None, progress=None):
+def answering(*, openai_client, jev_client, progress=None):
     """Return the storage app's factory: (storage, tracking) -> admitted-question continuation.
 
     The caller creates the clients (hosted.build_app, or a test); they live for the whole process.
     Nothing here reads credentials or the environment.
     """
-    catalog = load_knowledge() if catalog is None else catalog
+    # Pass 4 (owner 2026-11-24): no packaged FAQ copy is loaded; Chroma is the only FAQ store.
     evidence_models = EvidenceModels(jev=jev_client, reviewer=openai_client, embedding=openai_client,
                                      jev_model=JEV_MODEL)
     answer_models = AnswerModels(client=openai_client, model=ANSWER_MODEL, reasoning=ANSWER_REASONING)
@@ -39,7 +38,7 @@ def answering(*, openai_client, jev_client, catalog=None, progress=None):
                 report(1)  # Progress step 1: checking the question.
             try:
                 return run_reviewed_workflow(
-                    **state, storage=storage, tracking=tracking, request_id=request_id, catalog=catalog,
+                    **state, storage=storage, tracking=tracking, request_id=request_id,
                     evidence_models=evidence_models, answer_models=answer_models, review_models=review_models,
                     routing_models=routing_models,
                     jev_client=jev_client, reviewer_client=openai_client, fallback_reviewer_client=openai_client,
