@@ -125,7 +125,6 @@ class EvidenceService:
         self.topic_confidence_trigger=topic_confidence_trigger  # Topic bar (plan 4f), from wiring.py.
         self.history_identity_resolver=history_identity_resolver  # Explicit opt-in; normal serving stays unchanged.
         self._identity_attempted=False  # Shared across initial and supplementary searches in this request.
-        self._identity_selected_ids=set()  # New classifier selections still need exact historical access.
         self.searches, self.pending, self._ids = 0, None, set()
         self._supplemented = False
         self._selected, self._reviewed = [], 0
@@ -480,7 +479,6 @@ class EvidenceService:
             self._judgments[stage+'.identity_resolution']=resolved
             kind,selected,uncertain=resolved.status,tuple(ids),()
             if kind=='clear':
-                self._identity_selected_ids.update(ids)
                 replaced={stage+'.case_resolution',*(stage+'.'+identity for identity in ids)}
                 self._unresolved_judgments=[key for key in self._unresolved_judgments if key not in replaced]
         chosen=self._select(candidates,selected,uncertain)
