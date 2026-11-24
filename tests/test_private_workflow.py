@@ -261,7 +261,15 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_customer_continuation_ignores_only_unrelated_weak_route_fields(self):
         for name,company,scores,released in (('unrelated weak company score',.53,{},True),
                                              ('unrelated weak department score',None,{'billing_payments':.47},True),
-                                             ('another answered topic is weak',None,{'billing_payments':.54},False)):
+                                             ('another answered topic is weak',None,{'billing_payments':.54},False),
+                                             # Reviewer gap 2026-11-24 (evidence.py:734): the recalled answered
+                                             # topic at p=0.6 is settled by the topic bar (0.55) but unsure under
+                                             # the choice bar (0.85); at p=0.52 it is unsure under both. Break
+                                             # caught: the history path uses the wrong bar or none.
+                                             ('the answered topic at 0.6 is settled',None,
+                                              {'shipping_delivery':.6},True),
+                                             ('the answered topic at 0.52 is unsure',None,
+                                              {'shipping_delivery':.52},False)):
             with self.subTest(name=name):
                 await self.reset_http()
                 answered=name.startswith('another')

@@ -73,6 +73,37 @@ class OwnedApplicationTests(unittest.TestCase):
         self.assertTrue(state['cleanup_started'].is_set())
 
 
+
+class ProductionHostWiringTests(unittest.TestCase):
+    # Reviewer gap 2026-11-24 (storage_app.py:226): the history tests use test-only host copies, so the production
+    # history host's own stop function was unchecked. Break caught: it stops question admission, or nothing.
+    def test_the_history_host_stops_history_admission_not_question_admission(self):
+        from unittest.mock import patch
+        from shopunow import api
+        from shopunow.storage_app import create_storage_app
+
+        async def connect():  # Never awaited: no lifespan runs in this test.
+            raise AssertionError('storage must not be used')
+        app = create_storage_app(connect=connect, api_token='synthetic-test-token', collection_names=('p', 'c', 'e'))
+        stopped = []
+
+        async def application(scope, receive, send):
+            scope['identity_http']['handle'] = 'history-handle'  # As a successful history submission does.
+        app.application = application
+
+        async def history_stop(handle):
+            stopped.append(('history', handle))
+
+        async def question_stop(handle):
+            stopped.append(('question', handle))
+
+        async def main():
+            await app({'type': 'http', 'path': '/history'}, None, None)
+        with patch.object(api, 'stop_history_admission', history_stop), \
+                patch.object(api, 'stop_question_admission', question_stop):
+            anyio.run(main)
+        self.assertEqual(stopped, [('history', 'history-handle')])
+
 if __name__ == '__main__':
     unittest.main()
 
