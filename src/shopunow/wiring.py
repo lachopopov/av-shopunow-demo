@@ -5,7 +5,7 @@ from shopunow.workflow import run_reviewed_workflow  # Slice 5 composer: review,
 
 # Evaluated configuration (CD-099): fixed in code so a host setting cannot silently weaken a check.
 SECURITY_TRIGGER = .7  # Attack-risk score that calls the incoming security reviewer.
-TOPIC_TRIGGER = .5  # Score at which a topic or history need counts as present.
+TOPIC_TRIGGER = .5  # Score at which a department topic counts as present.
 SEMANTIC_CONFIDENCE_TRIGGER = .7  # Below this a semantic choice is uncertain and adjudicated.
 JEV_MODEL = 'jev-1.14.0'
 ANSWER_MODEL, ANSWER_REASONING = 'gpt-6.1-sol', 'medium'  # Specialists and CentralSupport.
