@@ -721,12 +721,18 @@ class EvidenceService:
         if not history or result.kind not in ('ready','insufficient_evidence'):
             return result
         from shopunow.workflow import permitted_routes
-        answers=self._historical_access(target,history)
+        # Employees: saved history holds no internal fact (owner 2026-11-24, Pass 5), so their release never
+        # depends on a historical topic judgment; none is asked (audit ROUTE-02: it could only fail the recall).
+        employee=self.profile.role=='employee'
+        answers=None if employee else self._historical_access(target,history)
         recalled=tuple(row.conversation_id for row in self._selected+self._resolution_candidates
                        if row.source_kind=='owned_history')
         if self.tracking.excludes(recalled):
             self._history_dispositions.append(PartDisposition('history','technical_failure'))
             raise ValueError('Recalled evidence became unresolved during historical access.')
+        if employee:
+            self._history_access_ids.update(row.source_record_id for row in history)
+            return result
         stage=f'history_access_{self.searches}.'
         self._judgments.update((stage+key,value) for key,value in answers.items())
         unsettled=[stage+key for key,value in answers.items()
@@ -739,9 +745,8 @@ class EvidenceService:
         # Customers: only a weak restricted or currently answered topic can change this access decision.
         guarded={stage+'topic_'+part for part in ('hr','it_support','facilities_admin')}|{
             stage+('company_wide_topic' if part=='central_support' else 'topic_'+part) for part in self.destinations}
-        # Employees: saved history holds no internal fact (owner 2026-11-24, Pass 5), so it is released;
-        # customers keep a confident route for what matters (H5, unchanged).
-        released=self.profile.role=='employee' or (not guarded.intersection(unsettled) and bool(destinations)
+        # Customers keep a confident route for what matters (H5, unchanged); employees returned above.
+        released=(not guarded.intersection(unsettled) and bool(destinations)
             and (weak_intent or set(destinations)<=set(self.destinations)))
         if released and not refused:
             self._history_access_ids.update(row.source_record_id for row in history)

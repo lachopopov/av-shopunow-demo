@@ -73,8 +73,9 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 await self.employee(department)
                 fixture=self.recalled_employee_fixture()
                 await self.post()
-                route=next(body for stage,body in fixture.calls if stage=='history_route')
-                self.assertNotIn('restricted_history_subject',route['questions'])
+                # Audit ROUTE-02 (owner 2026-11-24): employee release needs no historical topic check, so none
+                # is made (an extra call could only fail the recall).
+                self.assertFalse([stage for stage,_ in fixture.calls if stage=='history_route'])
                 self.assertTrue(any(row['source_kind']=='owned_history'
                                     for payload in fixture.producer_calls for row in payload['evidence']))
 
