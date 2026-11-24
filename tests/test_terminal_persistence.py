@@ -610,15 +610,15 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
         for schema, body in fixture.calls:
             if isinstance(body, dict) and 'model' in body:
                 sent.setdefault(schema, (body['model'], (body.get('reasoning') or {}).get('effort')))
-        self.assertEqual(sent['ProducerReply'], ('gpt-6.1-sol', 'medium'))
+        self.assertEqual(sent['ProducerReply'], ('gpt-6.2-sol', 'medium'))
         self.assertEqual(sent['FinalReviewReply'], ('gpt-6-luna', 'high'))
         self.assertEqual(sent['incoming'][0], 'jev-1.14.0')
         self.assertEqual((wiring.SECURITY_TRIGGER, wiring.TOPIC_TRIGGER, wiring.SEMANTIC_CONFIDENCE_TRIGGER,
                           wiring.TOPIC_CONFIDENCE_TRIGGER), (.7, .5, .7, .1))  # Topic bar: p 0.55 (plan 4f).
 
     async def test_the_served_routing_tie_breaker_uses_sol_low_while_the_writer_stays_on_sol_medium(self):
-        # Break caught (owner decision 2026-11-23, after the Luna and Sol-low replays): the routing call does not
-        # use Sol at low effort, or the writer is moved off the evaluated Sol medium configuration with it.
+        # Break caught (owner decisions 2026-11-23 low effort, 2026-11-24 gpt-6.2-sol): the routing call is not
+        # gpt-6.2-sol low, or the writer is not gpt-6.2-sol medium.
         from shopunow import wiring
         fixture = self.fixture
         fixture.answers['topic_shipping_delivery']['noul'] = .52  # Present but uncertain (band 0.45-0.55): routing is adjudicated.
@@ -630,12 +630,12 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
         for schema, body in fixture.calls:
             if isinstance(body, dict) and 'model' in body:
                 sent.setdefault(schema, (body['model'], (body.get('reasoning') or {}).get('effort')))
-        self.assertEqual(sent['RouterDecision'], ('gpt-6.1-sol', 'low'))
-        self.assertEqual(sent['ProducerReply'], ('gpt-6.1-sol', 'medium'))
+        self.assertEqual(sent['RouterDecision'], ('gpt-6.2-sol', 'low'))
+        self.assertEqual(sent['ProducerReply'], ('gpt-6.2-sol', 'medium'))
 
-    async def test_the_served_candidate_check_uses_sol_6_2_low_while_the_writer_stays_on_sol_6_1_medium(self):
-        # Break caught (owner decision 2026-11-24, after the model replay): the excerpt keep/drop call
-        # (CandidateResolution) is not on gpt-6.2-sol low, or the writer or router is moved with it.
+    async def test_the_served_candidate_check_uses_sol_6_2_low_while_the_writer_uses_sol_6_2_medium(self):
+        # Break caught (owner decisions 2026-11-24): the excerpt keep/drop call (CandidateResolution) is not on
+        # gpt-6.2-sol low, or the writer is not on gpt-6.2-sol medium.
         from shopunow import wiring
         fixture = self.fixture
         fixture.current_match = 'uncertain'  # Jev unsure about the Knowledge excerpt: the candidate check runs.
@@ -649,7 +649,7 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
             if isinstance(body, dict) and 'model' in body:
                 sent.setdefault(schema, (body['model'], (body.get('reasoning') or {}).get('effort')))
         self.assertEqual(sent['CandidateResolution'], ('gpt-6.2-sol', 'low'))
-        self.assertEqual(sent['ProducerReply'], ('gpt-6.1-sol', 'medium'))
+        self.assertEqual(sent['ProducerReply'], ('gpt-6.2-sol', 'medium'))
 
     async def test_the_served_wiring_reports_each_answer_step_in_order_and_clears_it_at_the_end(self):
         # Break caught (owner request 2026-11-23): the progress bar shows no step, a wrong order, or a

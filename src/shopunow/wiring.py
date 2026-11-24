@@ -9,9 +9,9 @@ TOPIC_TRIGGER = .5  # Score at which a department topic counts as present.
 SEMANTIC_CONFIDENCE_TRIGGER = .7  # Below this a semantic choice is uncertain and adjudicated.
 TOPIC_CONFIDENCE_TRIGGER = .1  # Topic settled when |2p - 1| >= this: p >= 0.55 or <= 0.45 (owner 2026-11-24, plan 4f).
 JEV_MODEL = 'jev-1.14.0'
-ANSWER_MODEL, ANSWER_REASONING = 'gpt-6.1-sol', 'medium'  # Specialists and CentralSupport.
+ANSWER_MODEL, ANSWER_REASONING = 'gpt-6.2-sol', 'medium'  # Specialists and CentralSupport (owner 2026-11-24: 6.2).
 REVIEW_MODEL, REVIEW_REASONING = 'gpt-6-luna', 'high'  # Both final reviewers (CD-095).
-ROUTING_MODEL, ROUTING_REASONING = 'gpt-6.1-sol', 'low'  # Routing tie-breaker (owner 2026-11-23; low = Sol's lowest).
+ROUTING_MODEL, ROUTING_REASONING = 'gpt-6.2-sol', 'low'  # Routing tie-breaker (owner 2026-11-23 low; 2026-11-24 6.2).
 # Excerpt keep/drop call (CandidateResolution), owner 2026-11-24 after the model replay: 1.6 s vs 4.1 s median.
 CANDIDATE_MODEL, CANDIDATE_REASONING = 'gpt-6.2-sol', 'low'
 # Incoming review (gpt-6-luna medium, one gpt-6.1-terra low backup), history identity (gpt-6-luna),

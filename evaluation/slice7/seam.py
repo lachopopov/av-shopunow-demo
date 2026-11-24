@@ -1,7 +1,7 @@
 # Python 3.12 / OpenAI 3.46.0 / httpx2 2.16.0; Slice 7 LOCAL evaluation — planted-defect seam cases (design v3 §2, §6)
 # Adapted from the Slice 5 driver (handover_tracking/slice5-driver/driver.py, local only; its self-check passed on
 # 2026-11-22 against this code). A frozen draft carrying a planted defect enters the REAL complete_reviewed seam
-# (live gpt-6-luna high reviewers, gpt-6.1-sol correction, real saving). A case passes only if the defect is
+# (live gpt-6-luna high reviewers, gpt-6.2-sol correction (wiring.py), real saving). A case passes only if the defect is
 # neither delivered nor saved. Reported separately as "seam" (these do not pass through the served question path).
 import json
 import logging
