@@ -311,6 +311,26 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual([stage for stage,_ in calls][:1],['routing'])
         self.assertEqual(set(result.destinations),{'shipping_delivery','billing_payments'})
 
+    def test_a_settled_internal_department_stays_refused_for_a_customer_when_intent_is_unsure(self):
+        # Audit ROUTE-01 review (2026-11-24). Break caught: a department Jev was sure of skips the customer refusal,
+        # so the customer gets a technical failure instead of the shipping answer plus the HR refusal.
+        from tests.test_incoming import judgment_answers
+        from shopunow.incoming import validate_judgments
+        self.service.semantic_confidence_trigger=.7
+        self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
+        self.service.answer_models,calls=self.semantic_adapter(destination='shipping_delivery')
+        answers=judgment_answers()
+        answers['topic_hr']['noul']=1.  # Jev is sure: HR, internal for a customer.
+        answers['topic_shipping_delivery']['noul']=.52  # Jev is unsure: shipping (the router decides).
+        answers['intent'].update(choice='unclear_or_other',confidence=.4,probabilities={
+            'information':.3,'individual_case_or_action':.05,'mixed':.05,'unclear_or_other':.6})
+        result=self.service.prepare(IncomingDecision('semantic_resolution',intent='unclear_or_other',
+            proposed_destinations=('hr','shipping_delivery'),judgments=validate_judgments(answers)))
+        self.assertEqual(self.profile.role,'customer')
+        self.assertEqual(result.kind,'ready')
+        self.assertNotIn('hr',result.destinations)
+        self.assertIn('hr',result.refused_parts)
+
     def semantic_adapter(self, *, dependency='independent', destination='shipping_delivery', status='resolved'):
         # Controlled external answers; the real service must still enforce source/access boundaries.
         from types import SimpleNamespace
