@@ -17,6 +17,7 @@ class RouterContractTests(unittest.TestCase):
                     'intent': 'information', 'dependency': 'independent'}
         self.service.answer_models = SimpleNamespace(resolve_routing=route, resolve_candidates=None)
         self.service.semantic_confidence_trigger = .7
+        self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
         return calls
 
     def decide(self, weak_dependency, shipping=1., dependency_confidence=.4):
@@ -55,6 +56,15 @@ class RouterContractTests(unittest.TestCase):
         calls = self.router()
         self.decide(weak_dependency=False, shipping=.52)
         self.assertEqual(len(calls), 1)
+
+    def test_a_topic_check_without_the_topic_bar_is_an_error(self):
+        # Break caught: a caller that forgets the topic bar silently falls back to the choice bar (old p 0.85).
+        from shopunow.incoming import semantic_confident
+        from typesafe_sdk import NoulAnswer
+        topic = NoulAnswer.model_validate({'type': 'noul', 'noul': .6})
+        with self.assertRaises(ValueError):
+            semantic_confident(topic, .7)
+        self.assertTrue(semantic_confident(topic, .7, .1))
 
     def test_choice_judgments_keep_the_seven_tenths_bar(self):
         calls = self.router()

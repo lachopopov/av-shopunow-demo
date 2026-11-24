@@ -110,7 +110,8 @@ class EvidenceService:
     """
     def __init__(self, *, storage, models, attempt, tracking, request, profile,
                  transcript, request_id, created_at, budget, uuid_factory=uuid4,topic_trigger=None,
-                 semantic_confidence_trigger=None,history_identity_resolver=None,answer_models=None,
+                 semantic_confidence_trigger=None,topic_confidence_trigger=None,history_identity_resolver=None,
+                 answer_models=None,
                  routing_models=None,on_progress=None):
         if (tracking is not attempt._hold_tracking or request.user_id != profile.user_id
                 or str(UUID(request.conversation_id)) != attempt._hold_id):
@@ -121,6 +122,7 @@ class EvidenceService:
         self.budget, self.uuid_factory = budget, uuid_factory
         self.topic_trigger=topic_trigger  # Explicit incoming configuration; no new default threshold.
         self.semantic_confidence_trigger=semantic_confidence_trigger
+        self.topic_confidence_trigger=topic_confidence_trigger  # Topic bar (plan 4f), from wiring.py.
         self.history_identity_resolver=history_identity_resolver  # Explicit opt-in; normal serving stays unchanged.
         self._identity_attempted=False  # Shared across initial and supplementary searches in this request.
         self._identity_selected_ids=set()  # New classifier selections still need exact historical access.
@@ -640,7 +642,7 @@ class EvidenceService:
                             continue  # Security and operating precedence keep their own approved rules.
                         if key=='sentiment':
                             continue  # Only a negative label escalates (upstream); its confidence never holds back evidence.
-                        if not semantic_confident(value,self.semantic_confidence_trigger):
+                        if not semantic_confident(value,self.semantic_confidence_trigger,self.topic_confidence_trigger):
                             self._unresolved_judgments.append('incoming.'+key)
                             if key=='company_wide_topic' or key.startswith('topic_'):
                                 self._pending_destinations.add('central_support' if key=='company_wide_topic'
@@ -729,9 +731,10 @@ class EvidenceService:
         stage=f'history_access_{self.searches}.'
         self._judgments.update((stage+key,value) for key,value in answers.items())
         unsettled=[stage+key for key,value in answers.items()
-                   if not semantic_confident(value,self.semantic_confidence_trigger)]
+                   if not semantic_confident(value,self.semantic_confidence_trigger,self.topic_confidence_trigger)]
         destinations,refused,dependency=permitted_routes(answers,role=self.profile.role,
-            topic_trigger=self.topic_trigger,semantic_confidence_trigger=self.semantic_confidence_trigger)
+            topic_trigger=self.topic_trigger,semantic_confidence_trigger=self.semantic_confidence_trigger,
+            topic_confidence_trigger=self.topic_confidence_trigger)
         self._unresolved_judgments.extend(unsettled)
         weak_intent='incoming.intent' in self._unresolved_judgments
         # Customers: only a weak restricted or currently answered topic can change this access decision.

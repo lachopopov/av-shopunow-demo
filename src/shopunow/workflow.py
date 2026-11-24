@@ -28,29 +28,31 @@ class IncomingInput(TypedDict):
     context: IncomingContext  # Public graph input cannot seed answers, clearance or decisions.
 
 
-def permitted_routes(answers,*,role,topic_trigger,semantic_confidence_trigger=None):
+def permitted_routes(answers,*,role,topic_trigger,semantic_confidence_trigger=None,topic_confidence_trigger=None):
     """One code-owned access rule for both initial and history-resolved topic judgments."""
     _number(topic_trigger)
     departments=tuple(department for department in
         ('hr','it_support','facilities_admin','billing_payments','shipping_delivery')
         if answers['topic_'+department].noul>=topic_trigger
-        and semantic_confident(answers['topic_'+department],semantic_confidence_trigger))
+        and semantic_confident(answers['topic_'+department],semantic_confidence_trigger,topic_confidence_trigger))
     refused=tuple(department for department in departments
                   if role=='customer' and department in ('hr','it_support','facilities_admin'))
     permitted=tuple(department for department in departments if department not in refused)
     destinations=(('central_support',) if answers['company_wide_topic'].noul>=topic_trigger
-                  and semantic_confident(answers['company_wide_topic'],semantic_confidence_trigger) else ())+permitted
+                  and semantic_confident(answers['company_wide_topic'],semantic_confidence_trigger,
+                                         topic_confidence_trigger) else ())+permitted
     return destinations,refused,answers['department_dependency'].choice
 
 
 def build_incoming_graph(*, judge, reviewer, authorize, security_trigger=None, topic_trigger=None,
-                         semantic_confidence_trigger=None,allow_semantic_resolution=False):
+                         semantic_confidence_trigger=None,topic_confidence_trigger=None,
+                         allow_semantic_resolution=False):
     """Caller-supplied evaluated triggers; no default threshold or normal served route.
 
     Controlled tests may inject provisional numbers. Production enablement still requires
     the separately reviewed evaluation evidence; supplying a number is not that evidence.
     """
-    for trigger in (security_trigger, topic_trigger, semantic_confidence_trigger):
+    for trigger in (security_trigger, topic_trigger, semantic_confidence_trigger, topic_confidence_trigger):
         if trigger is not None:
             _number(trigger)
 
@@ -93,10 +95,10 @@ def build_incoming_graph(*, judge, reviewer, authorize, security_trigger=None, t
             ('company_wide_topic','central_support'),('topic_hr','hr'),('topic_it_support','it_support'),
             ('topic_facilities_admin','facilities_admin'),('topic_billing_payments','billing_payments'),
             ('topic_shipping_delivery','shipping_delivery')) if answers[key].noul>=topic_trigger or
-                not semantic_confident(answers[key],semantic_confidence_trigger))
+                not semantic_confident(answers[key],semantic_confidence_trigger,topic_confidence_trigger))
         # Downstream retrieval must still enforce audience/general/home-department scope.
         destinations,refused,dependency=permitted_routes(answers,role=context.role,topic_trigger=topic_trigger,
-            semantic_confidence_trigger=semantic_confidence_trigger)
+            semantic_confidence_trigger=semantic_confidence_trigger,topic_confidence_trigger=topic_confidence_trigger)
         kind = 'continue'
         if answers['sentiment'].choice == 'negative':
             kind = 'handoff'  # Whole-request escalation follows security and access checks.
@@ -147,7 +149,7 @@ def run_incoming(*, request, profile, transcript, attempt, tracking, storage, re
                  jev_client, reviewer_client, jev_model, security_trigger=None,
                  topic_trigger=None, uuid_factory=None, utc_now=None, fallback_reviewer_client=None,
                  model_budget=None, on_cleared=None,observe_response=None,semantic_confidence_trigger=None,
-                 allow_semantic_resolution=False,observe_decision=None):
+                 topic_confidence_trigger=None,allow_semantic_resolution=False,observe_decision=None):
     """Admission continuation; no normal retrieval/dispatch or later-slice terminal save.
 
     Clients and thresholds must be explicitly supplied. Normal production routing has
@@ -191,7 +193,7 @@ def run_incoming(*, request, profile, transcript, attempt, tracking, storage, re
             call=None if model_budget is None else model_budget.call,observe_response=observe_response),
         authorize=attempt.authorize_normal_work, security_trigger=security_trigger,
         topic_trigger=topic_trigger,semantic_confidence_trigger=semantic_confidence_trigger,
-        allow_semantic_resolution=allow_semantic_resolution)
+        topic_confidence_trigger=topic_confidence_trigger,allow_semantic_resolution=allow_semantic_resolution)
     decision = graph.invoke({'context':context})['decision']
     question_event(request_id, decision.kind, stage='incoming_gate')
     if not attempt.authorize_normal_work():
@@ -223,7 +225,7 @@ def run_incoming(*, request, profile, transcript, attempt, tracking, storage, re
 def run_private_workflow(*,request,profile,transcript,attempt,tracking,storage,request_id,
                          evidence_models,answer_models,jev_client,reviewer_client,jev_model,
                          security_trigger=None,topic_trigger=None,semantic_confidence_trigger=None,
-                         history_identity_resolver=None,fallback_reviewer_client=None,model_budget=None,
+                         topic_confidence_trigger=None,history_identity_resolver=None,fallback_reviewer_client=None,model_budget=None,
                          observe_evidence=None,observe_result=None,observe_response=None,utc_now=None,
                          uuid_factory=None,routing_models=None,on_progress=None):
     """Compose Slice4 inside the admitted worker; public return remains the incoming safe result.
@@ -266,6 +268,7 @@ def run_private_workflow(*,request,profile,transcript,attempt,tracking,storage,r
             tracking=tracking,storage=storage,request_id=request_id,created_at=now().isoformat(),
             models=evidence_models,answer_models=answer_models,routing_models=routing_models,on_progress=on_progress,budget=budget,
             topic_trigger=topic_trigger,semantic_confidence_trigger=semantic_confidence_trigger,
+            topic_confidence_trigger=topic_confidence_trigger,
             history_identity_resolver=history_identity_resolver,**options)
         evidence=service.prepare(decision)  # Exact pending verification precedes retrieval and generation.
         if observe_evidence is not None:
@@ -284,7 +287,7 @@ def run_private_workflow(*,request,profile,transcript,attempt,tracking,storage,r
         tracking=tracking,storage=storage,request_id=request_id,jev_client=jev_client,
         reviewer_client=reviewer_client,jev_model=jev_model,security_trigger=security_trigger,
         topic_trigger=topic_trigger,semantic_confidence_trigger=semantic_confidence_trigger,
-        allow_semantic_resolution=answer_models is not None,model_budget=budget,on_cleared=cleared,
+        topic_confidence_trigger=topic_confidence_trigger,allow_semantic_resolution=answer_models is not None,model_budget=budget,on_cleared=cleared,
         fallback_reviewer_client=fallback_reviewer_client,observe_response=observe_response,
         utc_now=utc_now,uuid_factory=uuid_factory,observe_decision=decisions.append)
     if not progressed:

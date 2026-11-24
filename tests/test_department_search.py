@@ -64,6 +64,7 @@ class DepartmentSearchTests(unittest.TestCase):
         from shopunow.workflow import IncomingDecision
         from tests.test_incoming import judgment_answers
         self.service.semantic_confidence_trigger = .7
+        self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
         answers = judgment_answers()
         answers['topic_billing_payments']['noul'] = .55
         result = self.service.prepare(IncomingDecision('continue', destinations=(), intent='information',

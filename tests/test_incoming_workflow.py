@@ -18,7 +18,7 @@ class IncomingWorkflowTests(unittest.TestCase):
                 answers[field]['probabilities']={name:(.5 if name==label else .5/(len(labels)-1)) for name in labels}
                 answers['company_wide_topic']['noul']=.53
                 graph=build_incoming_graph(judge=lambda context:answers,reviewer=None,authorize=lambda:True,
-                    security_trigger=.7,topic_trigger=.5,semantic_confidence_trigger=.7)
+                    security_trigger=.7,topic_trigger=.5,semantic_confidence_trigger=.7,topic_confidence_trigger=.1)
                 result=graph.invoke({'context':IncomingContext('Question','customer',None,(),False)})['decision']
                 self.assertEqual(result.kind,expected)
                 self.assertEqual(result.destinations,())
@@ -31,7 +31,7 @@ class IncomingWorkflowTests(unittest.TestCase):
                 answers['topic_shipping_delivery']['noul']=.95
                 answers['company_wide_topic']['noul']=probability
                 graph=build_incoming_graph(judge=lambda context:answers,reviewer=None,authorize=lambda:True,
-                    security_trigger=.7,topic_trigger=.5,semantic_confidence_trigger=.7)
+                    security_trigger=.7,topic_trigger=.5,semantic_confidence_trigger=.7,topic_confidence_trigger=.1)
                 decision=graph.invoke({'context':IncomingContext('Question','customer',None,(),False)})['decision']
                 self.assertEqual(decision.destinations,('shipping_delivery',))
                 self.assertIn('central_support',decision.proposed_destinations)

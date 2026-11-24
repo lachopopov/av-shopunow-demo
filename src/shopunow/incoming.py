@@ -70,23 +70,28 @@ HISTORY_ROUTE_FIELDS = tuple(key for key in NOUL_FIELDS
                             if key=='company_wide_topic' or key.startswith('topic_')) + ('department_dependency',)
 
 
-TOPIC_SETTLED = .1  # = 2 x (0.55 - 0.5); was the shared 0.7 (= p 0.85). Jev replay 2026-11-24, plan §4f.
-
-
 def _number(value, maximum=1.0):
     # Python bool is an int subclass; a boolean is not a provider probability.
     if type(value) not in (int, float) or not isfinite(value) or not 0 <= value <= maximum:
         raise ValueError('Invalid judgment number.')
 
 
-def semantic_confident(answer, threshold):
-    """Use native uncertainty for semantics; this never authorizes access or security."""
+def semantic_confident(answer, threshold, topic_threshold=None):
+    """Use native uncertainty for semantics; this never authorizes access or security.
+
+    threshold is the choice bar (intent, dependency, relevance); topic_threshold is the yes/no topic bar
+    (owner 2026-11-24, plan 4f). Both come from wiring.py. A configured topic check without its bar is an error,
+    so no caller silently falls back to the choice bar.
+    """
     if threshold is None:
         return True  # Unconfigured callers retain the frozen policy, not a new serving default.
     _number(threshold)
-    if isinstance(answer,NoulAnswer):  # Topics: settled at p >= 0.55 or <= 0.45 (owner 2026-11-24, plan §4f).
-        return abs(2*answer.noul-1)>=TOPIC_SETTLED
-    return answer.confidence>=threshold  # Choices (intent, dependency, relevance) keep the configured bar.
+    if isinstance(answer,NoulAnswer):  # Topics: confidence = |2p - 1|.
+        if topic_threshold is None:
+            raise ValueError('A topic confidence check needs the topic bar.')
+        _number(topic_threshold)
+        return abs(2*answer.noul-1)>=topic_threshold
+    return answer.confidence>=threshold
 
 
 def validate_judgments(answers):

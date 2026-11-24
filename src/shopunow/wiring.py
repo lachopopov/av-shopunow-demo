@@ -7,6 +7,7 @@ from shopunow.workflow import run_reviewed_workflow  # Slice 5 composer: review,
 SECURITY_TRIGGER = .7  # Attack-risk score that calls the incoming security reviewer.
 TOPIC_TRIGGER = .5  # Score at which a department topic counts as present.
 SEMANTIC_CONFIDENCE_TRIGGER = .7  # Below this a semantic choice is uncertain and adjudicated.
+TOPIC_CONFIDENCE_TRIGGER = .1  # Topic settled when |2p - 1| >= this: p >= 0.55 or <= 0.45 (owner 2026-11-24, plan 4f).
 JEV_MODEL = 'jev-1.14.0'
 ANSWER_MODEL, ANSWER_REASONING = 'gpt-6.1-sol', 'medium'  # Specialists and CentralSupport.
 REVIEW_MODEL, REVIEW_REASONING = 'gpt-6-luna', 'high'  # Both final reviewers (CD-095).
@@ -44,6 +45,7 @@ def answering(*, openai_client, jev_client, progress=None):
                     jev_client=jev_client, reviewer_client=openai_client, fallback_reviewer_client=openai_client,
                     jev_model=JEV_MODEL, security_trigger=SECURITY_TRIGGER, topic_trigger=TOPIC_TRIGGER,
                     semantic_confidence_trigger=SEMANTIC_CONFIDENCE_TRIGGER,
+                    topic_confidence_trigger=TOPIC_CONFIDENCE_TRIGGER,
                     history_identity_resolver=evidence_models.resolve_history_identity, on_progress=report)
             finally:
                 if progress is not None:

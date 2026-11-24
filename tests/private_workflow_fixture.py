@@ -33,6 +33,7 @@ class PrivateWorkflowFixture(IncomingFixture):
         self.history_topic_scores={}  # Optional per-topic scores that replace the shared routed strength.
         self.routing_intent='information'  # Controlled adjudicated intent; None leaves intent unresolved.
         self.semantic_confidence_trigger=.7  # Explicit workflow configuration; None means not configured.
+        self.topic_confidence_trigger=.1  # Topic bar from wiring.py (plan 4f).
         self.history_match='relevant'  # Controlled relevance of owned-history excerpts.
         self.current_match_for=lambda text:self.current_match  # Controlled per-excerpt Knowledge relevance.
         self.candidate_reply=None  # Optional controlled candidate adjudication failure.
@@ -187,6 +188,7 @@ class PrivateWorkflowFixture(IncomingFixture):
                 request_id=request_id,evidence_models=self.evidence_models,
                 answer_models=self.answer_models,jev_client=self.jev,reviewer_client=self.reviewer,
                 jev_model='offline-jev',security_trigger=self.security_trigger,topic_trigger=.5,semantic_confidence_trigger=self.semantic_confidence_trigger,
+                topic_confidence_trigger=self.topic_confidence_trigger,
                 model_budget=self.budget,observe_response=self.observe_response,
                 observe_evidence=self.evidence_results.append,observe_result=observe,
                 utc_now=lambda:datetime(2026,11,16,tzinfo=timezone.utc))

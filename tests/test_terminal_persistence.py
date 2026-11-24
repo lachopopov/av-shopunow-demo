@@ -63,6 +63,7 @@ class ReviewedFixture(PrivateWorkflowFixture):
                 answer_models=self.answer_models, review_models=self.review_models, jev_client=self.jev,
                 reviewer_client=self.reviewer, jev_model='offline-jev', security_trigger=self.security_trigger,
                 topic_trigger=.5, semantic_confidence_trigger=self.semantic_confidence_trigger,
+                topic_confidence_trigger=self.topic_confidence_trigger,
                 model_budget=self.budget if self.pass_budget else None, observe_response=self.observe_response,
                 utc_now=lambda: datetime(2026, 11, 16, tzinfo=timezone.utc))
             return self.result
@@ -612,8 +613,8 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent['ProducerReply'], ('gpt-6.1-sol', 'medium'))
         self.assertEqual(sent['FinalReviewReply'], ('gpt-6-luna', 'high'))
         self.assertEqual(sent['incoming'][0], 'jev-1.14.0')
-        self.assertEqual((wiring.SECURITY_TRIGGER, wiring.TOPIC_TRIGGER, wiring.SEMANTIC_CONFIDENCE_TRIGGER),
-                         (.7, .5, .7))
+        self.assertEqual((wiring.SECURITY_TRIGGER, wiring.TOPIC_TRIGGER, wiring.SEMANTIC_CONFIDENCE_TRIGGER,
+                          wiring.TOPIC_CONFIDENCE_TRIGGER), (.7, .5, .7, .1))  # Topic bar: p 0.55 (plan 4f).
 
     async def test_the_served_routing_tie_breaker_uses_sol_low_while_the_writer_stays_on_sol_medium(self):
         # Break caught (owner decision 2026-11-23, after the Luna and Sol-low replays): the routing call does not

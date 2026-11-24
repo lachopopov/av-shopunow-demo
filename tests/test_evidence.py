@@ -95,6 +95,7 @@ class EvidenceTests(unittest.TestCase):
                 if failure=='timeout':
                     self.setUp()
                 self.service.semantic_confidence_trigger=.7
+                self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
                 original=self.models.relevance
                 def relevance(question,candidates,*,timeout):
                     if candidates[0].source_kind=='knowledge':
@@ -132,6 +133,7 @@ class EvidenceTests(unittest.TestCase):
         from openai import OpenAI
         from shopunow.model_clients import AnswerModels
         self.service.semantic_confidence_trigger=.7
+        self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
         original=self.models.relevance
         def relevance(question,candidates,*,timeout):
             if candidates[0].source_kind=='knowledge':
@@ -191,6 +193,7 @@ class EvidenceTests(unittest.TestCase):
         from tests.test_incoming import judgment_answers
         from shopunow.incoming import validate_judgments
         self.service.semantic_confidence_trigger=.7
+        self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
         self.service.topic_trigger=.5
         self.service.answer_models,calls=self.semantic_adapter(destination='hr')
         answers=judgment_answers()
@@ -205,6 +208,7 @@ class EvidenceTests(unittest.TestCase):
         from tests.test_incoming import judgment_answers
         from shopunow.incoming import validate_judgments
         self.service.semantic_confidence_trigger=.7
+        self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
         self.service.answer_models,calls=self.semantic_adapter()
         answers=judgment_answers()
         answers['intent'].update(choice='mixed',probabilities={
@@ -221,6 +225,7 @@ class EvidenceTests(unittest.TestCase):
         from tests.test_incoming import judgment_answers
         from shopunow.incoming import validate_judgments
         self.service.semantic_confidence_trigger=.7
+        self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
         self.service.answer_models,calls=self.semantic_adapter()
         answers=judgment_answers()
         answers['department_dependency'].update(confidence=.4,probabilities={
@@ -259,7 +264,7 @@ class EvidenceTests(unittest.TestCase):
                 answers['sentiment'].update(choice=sentiment,probabilities={
                     key:float(key==sentiment) for key in answers['sentiment']['probabilities']})
                 graph=build_incoming_graph(judge=lambda context:answers,reviewer=lambda *args:{'verdict':'clear'},
-                    authorize=lambda:True,security_trigger=.7,topic_trigger=.5,semantic_confidence_trigger=.7,
+                    authorize=lambda:True,security_trigger=.7,topic_trigger=.5,semantic_confidence_trigger=.7,topic_confidence_trigger=.1,
                     allow_semantic_resolution=True)
                 self.assertEqual(graph.invoke({'context':IncomingContext('What is tracking?','customer',None,(),False)})
                                  ['decision'].kind,want)
@@ -270,6 +275,7 @@ class EvidenceTests(unittest.TestCase):
             with self.subTest(status=status):
                 self.setUp()
                 self.service.semantic_confidence_trigger=.7
+                self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
                 self.service.answer_models,calls=self.semantic_adapter(status=status)
                 result=self.service.prepare(IncomingDecision('semantic_resolution',intent='unclear_or_other'))
                 self.assertEqual(result.kind,want)
@@ -308,6 +314,7 @@ class EvidenceTests(unittest.TestCase):
             with self.subTest(verdict=verdict):
                 self.setUp()
                 self.service.semantic_confidence_trigger=.7
+                self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
                 self.models.verdict=verdict
                 original=self.models.relevance
                 def relevance(question,candidates,*,timeout):
@@ -322,6 +329,7 @@ class EvidenceTests(unittest.TestCase):
                 self.assertEqual([row.source_record_id for row in result.cleared],['SU-SD-001'] if verdict=='clean' else [])
         self.setUp()
         self.service.semantic_confidence_trigger=.7
+        self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
         original=self.models.relevance
         def relevance(question,candidates,*,timeout):
             if candidates[0].source_kind=='knowledge':
@@ -344,6 +352,7 @@ class EvidenceTests(unittest.TestCase):
             with self.subTest(scope=scope):
                 self.setUp()
                 self.service.semantic_confidence_trigger=.7
+                self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
                 if scope!='public_general':
                     record=self.k.KnowledgeRecord.model_validate_json(__import__('json').dumps(source_row(
                         classification='non_general',access_scope=scope,
@@ -364,6 +373,7 @@ class EvidenceTests(unittest.TestCase):
         from shopunow.incoming import validate_judgments
         from tests.test_incoming import judgment_answers
         self.service.semantic_confidence_trigger=.7
+        self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
         answers=judgment_answers()
         answers['topic_hr']['noul']=.53
         result=self.service.prepare(IncomingDecision('continue',intent='information',
@@ -382,6 +392,7 @@ class EvidenceTests(unittest.TestCase):
             with self.subTest(subject=subject,verdict=verdict):
                 self.setUp()
                 self.service.semantic_confidence_trigger=.7
+                self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
                 self.service.topic_trigger=.5
                 self.models.verdict=verdict
                 pending,terminal=transcript_pair()
@@ -417,6 +428,7 @@ class EvidenceTests(unittest.TestCase):
             with self.subTest(verdict=verdict,dependency=dependency,current=current):
                 self.setUp()
                 self.service.semantic_confidence_trigger=.7
+                self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
                 self.service.topic_trigger=.5
                 pending,terminal=transcript_pair()
                 self.storage.history_rows=terminal
@@ -454,10 +466,11 @@ class EvidenceTests(unittest.TestCase):
         answers['intent'].update(confidence=.4,probabilities={
             'information':.55,'individual_case_or_action':.15,'mixed':.15,'unclear_or_other':.15})
         graph=build_incoming_graph(judge=lambda context:answers,reviewer=None,authorize=lambda:True,
-            security_trigger=.7,topic_trigger=.5,semantic_confidence_trigger=.7)
+            security_trigger=.7,topic_trigger=.5,semantic_confidence_trigger=.7,topic_confidence_trigger=.1)
         decision=graph.invoke({'context':IncomingContext('Recap the old discussion; separately explain tracking.',
             'customer',None,(),False)})['decision']
         self.service.semantic_confidence_trigger=.7
+        self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
         self.service.topic_trigger=.5
         result=self.service.prepare(decision)
         self.assertEqual(result.kind,'insufficient_evidence')
@@ -512,6 +525,7 @@ class EvidenceTests(unittest.TestCase):
         self.storage.header=lambda *args,**kwargs:header
         self.storage.events=lambda *args,**kwargs:events
         self.service.semantic_confidence_trigger=.7
+        self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
         self.service.topic_trigger=.5
         def relevance(question,candidates,*,timeout):
             answers=relevance_answers(candidates,selected=())
@@ -653,7 +667,7 @@ class EvidenceTests(unittest.TestCase):
         self.service.history_identity_resolver=lambda question,candidates,**kwargs: {
             'status':'clear','selected_excerpt_ids':[candidates[1].excerpt_id]}
         graph=build_incoming_graph(judge=lambda context:answers,reviewer=None,authorize=lambda:True,
-            security_trigger=.7,topic_trigger=.5,semantic_confidence_trigger=.7)
+            security_trigger=.7,topic_trigger=.5,semantic_confidence_trigger=.7,topic_confidence_trigger=.1)
         decision=graph.invoke({'context':IncomingContext(self.request.question,'customer',None,(),False)})['decision']
         self.service.prepare(decision)
         result=self.service.supplementary(target=self.request.question)  # The owner's history request.
