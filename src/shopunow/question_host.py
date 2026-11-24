@@ -6,6 +6,44 @@ from fastapi import Depends, Request  # Use public request and dependency interf
 from shopunow import admission, api  # Compose the actual production boundary components.
 
 
+async def run_owned_application(application, scope, receive, send, *, state, stop_admission):
+    """Run one ASGI call in an owned task group; shared by the question host and the storage (history) host.
+
+    The application runs as a child task, so the server-facing task is never it. Its cleanup stops admission under
+    a shield before any await, and its first exception is re-raised only after the group has joined.
+    """
+    finished = anyio.Event()
+    errors = []  # Preserve native application exceptions after the owned group joins.
+
+    async def run_application():
+        try:
+            with anyio.CancelScope() as application_scope:
+                state["application_scope"] = application_scope
+                try:
+                    await application(scope, receive, send)
+                finally:
+                    # Shield before the first await, including thread-token acquisition.
+                    with anyio.CancelScope(shield=True):
+                        state["cleanup_started"].set()
+                        if state["handle"] is not None:
+                            await stop_admission(state["handle"])
+        except Exception as error:
+            errors.append(error)  # Safe FastAPI handler retains its normal re-raise behavior.
+        finally:
+            state["application_done"] = True
+            finished.set()
+
+    async with anyio.create_task_group() as group:
+        state["group"] = group
+        group.start_soon(run_application)  # The server-facing task never is this child.
+        try:
+            await finished.wait()
+        finally:
+            group.cancel_scope.cancel()  # Native group exit joins observer and child cleanup.
+    if errors:
+        raise errors[0]
+
+
 class QuestionHTTPApp:
     """ASGI host for POST /interactions; the storage app serves it only when answering is configured."""
 
@@ -70,8 +108,6 @@ class QuestionHTTPApp:
             self.states.append(state)
         self.request_started.set()
         scope["question_http"] = state
-        finished = anyio.Event()
-        errors = []  # Preserve native application exceptions after the owned group joins.
 
         async def receive_once():
             message = await receive()
@@ -111,33 +147,8 @@ class QuestionHTTPApp:
                 if state["handle"] is not None:
                     await api.stop_question_admission(state["handle"])
 
-        async def run_application():
-            try:
-                with anyio.CancelScope() as application_scope:
-                    state["application_scope"] = application_scope
-                    try:
-                        await self.application(scope, receive_once, send_if_open)
-                    finally:
-                        # Shield before the first await, including thread-token acquisition.
-                        with anyio.CancelScope(shield=True):
-                            state["cleanup_started"].set()
-                            if state["handle"] is not None:
-                                await api.stop_question_admission(state["handle"])
-            except Exception as error:
-                errors.append(error)  # Safe FastAPI handler retains its normal re-raise behavior.
-            finally:
-                state["application_done"] = True
-                finished.set()
-
-        async with anyio.create_task_group() as group:
-            state["group"] = group
-            group.start_soon(run_application)  # The server-facing task never is this child.
-            try:
-                await finished.wait()
-            finally:
-                group.cancel_scope.cancel()  # Native group exit joins observer and child cleanup.
-        if errors:
-            raise errors[0]
+        await run_owned_application(self.application, scope, receive_once, send_if_open, state=state,
+                                    stop_admission=lambda handle: api.stop_question_admission(handle))
 
 
 # Flow: test host owns app -> validated body -> immediate admission -> owned observer

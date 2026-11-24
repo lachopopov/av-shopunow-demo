@@ -13,7 +13,7 @@ from shopunow.allowances import RollingAllowances
 from shopunow.profiles import load_profiles
 from shopunow.sdk_worker import LocalSDKWorker
 from shopunow.sdk_writes import SDKRecords, SDKEvidenceRecords
-from shopunow.question_host import QuestionHTTPApp
+from shopunow.question_host import QuestionHTTPApp, run_owned_application
 from shopunow.schemas import HandoffRequest, HandoffResponse
 
 
@@ -180,8 +180,6 @@ class StorageApplication:
                  "cleanup_started": anyio.Event(), "response_started": False,
                  "success_suppressed": False}
         scope["identity_http"] = state
-        finished = anyio.Event()
-        errors = []  # Preserve native application exceptions after the owned group joins.
 
         async def receive_once():
             message = await receive()
@@ -225,33 +223,8 @@ class StorageApplication:
                 if state["handle"] is not None:
                     await api.stop_history_admission(state["handle"])
 
-        async def run_application():
-            try:
-                with anyio.CancelScope() as application_scope:
-                    state["application_scope"] = application_scope
-                    try:
-                        await self.application(scope, receive_once, send_if_open)
-                    finally:
-                        # Shield before the first await, including thread-token acquisition.
-                        with anyio.CancelScope(shield=True):
-                            state["cleanup_started"].set()
-                            if state["handle"] is not None:
-                                await api.stop_history_admission(state["handle"])
-            except Exception as error:
-                errors.append(error)  # Safe FastAPI handler retains its normal re-raise behavior.
-            finally:
-                state["application_done"] = True
-                finished.set()
-
-        async with anyio.create_task_group() as group:
-            state["group"] = group
-            group.start_soon(run_application)  # The server-facing task never is this child.
-            try:
-                await finished.wait()
-            finally:
-                group.cancel_scope.cancel()  # Native group exit joins observer and child cleanup.
-        if errors:
-            raise errors[0]
+        await run_owned_application(self.application, scope, receive_once, send_if_open, state=state,
+                                    stop_admission=lambda handle: api.stop_history_admission(handle))
 
 
 def create_storage_app(*, connect, api_token, collection_names, knowledge_collection_name=None,
