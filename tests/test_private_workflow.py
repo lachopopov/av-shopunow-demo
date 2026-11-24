@@ -262,10 +262,10 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         for name,company,scores,released in (('unrelated weak company score',.53,{},True),
                                              ('unrelated weak department score',None,{'billing_payments':.47},True),
                                              ('another answered topic is weak',None,{'billing_payments':.54},False),
-                                             # Reviewer gap 2026-11-24 (evidence.py:734): the recalled answered
-                                             # topic at p=0.6 is settled by the topic bar (0.55) but unsure under
-                                             # the choice bar (0.85); at p=0.52 it is unsure under both. Break
-                                             # caught: the history path uses the wrong bar or none.
+                                             # Reviewer gap 2026-11-24 (evidence.py, history access): topic bar
+                                             # 0.1 = settled at p >= 0.55; the choice bar 0.7 used as a topic bar
+                                             # would need p >= 0.85. The 0.6 row catches the wrong bar; the 0.52
+                                             # row catches a bar that is too low.
                                              ('the answered topic at 0.6 is settled',None,
                                               {'shipping_delivery':.6},True),
                                              ('the answered topic at 0.52 is unsure',None,
@@ -284,14 +284,17 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 fixture.history_company_score=company
                 fixture.history_topic_scores=scores
                 def produce(payload,reply):
-                    asked=sum(row['part']=='shipping_delivery' for row in fixture.producer_calls)
-                    if payload['part']=='shipping_delivery' and asked==1:
+                    # Only the history owner may ask (two departments -> central_support), so key on the owner.
+                    asked=sum(row['history_owner'] for row in fixture.producer_calls)
+                    if payload['history_owner'] and asked==1:
                         reply.update(kind='context_needed',text=None,cited_ids=[],support_assertion=False,
                                      target='The earlier parcel correction')
                     return reply
                 fixture.producer_hook=produce
                 await self.post()
                 kinds={row['source_kind'] for payload in fixture.producer_calls for row in payload['evidence']}
+                # Every row must really reach the history check: exactly one recalled-history routing judgment.
+                self.assertEqual(sum(stage=='history_route' for stage,_ in fixture.calls),1)
                 self.assertEqual('owned_history' in kinds,released)
 
     async def test_unrouted_search_hint_with_an_uncertain_source_is_not_reported_unresolved(self):
