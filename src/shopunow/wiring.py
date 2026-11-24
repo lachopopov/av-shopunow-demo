@@ -12,6 +12,8 @@ JEV_MODEL = 'jev-1.14.0'
 ANSWER_MODEL, ANSWER_REASONING = 'gpt-6.1-sol', 'medium'  # Specialists and CentralSupport.
 REVIEW_MODEL, REVIEW_REASONING = 'gpt-6-luna', 'high'  # Both final reviewers (CD-095).
 ROUTING_MODEL, ROUTING_REASONING = 'gpt-6.1-sol', 'low'  # Routing tie-breaker (owner 2026-11-23; low = Sol's lowest).
+# Excerpt keep/drop call (CandidateResolution), owner 2026-11-24 after the model replay: 1.6 s vs 4.1 s median.
+CANDIDATE_MODEL, CANDIDATE_REASONING = 'gpt-6.2-sol', 'low'
 # Incoming review (gpt-6-luna medium, one gpt-6.1-terra low backup), history identity (gpt-6-luna),
 # embeddings (text-embedding-3-small) and the 5 process-wide model slots are the adapters' own defaults.
 
@@ -28,6 +30,7 @@ def answering(*, openai_client, jev_client, progress=None):
     answer_models = AnswerModels(client=openai_client, model=ANSWER_MODEL, reasoning=ANSWER_REASONING)
     review_models = AnswerModels(client=openai_client, model=REVIEW_MODEL, reasoning=REVIEW_REASONING)
     routing_models = AnswerModels(client=openai_client, model=ROUTING_MODEL, reasoning=ROUTING_REASONING)
+    candidate_models = AnswerModels(client=openai_client, model=CANDIDATE_MODEL, reasoning=CANDIDATE_REASONING)
 
     def factory(*, storage, tracking):
         def admitted(*, request_id, **state):
@@ -41,7 +44,7 @@ def answering(*, openai_client, jev_client, progress=None):
                 return run_reviewed_workflow(
                     **state, storage=storage, tracking=tracking, request_id=request_id,
                     evidence_models=evidence_models, answer_models=answer_models, review_models=review_models,
-                    routing_models=routing_models,
+                    routing_models=routing_models, candidate_models=candidate_models,
                     jev_client=jev_client, reviewer_client=openai_client, fallback_reviewer_client=openai_client,
                     jev_model=JEV_MODEL, security_trigger=SECURITY_TRIGGER, topic_trigger=TOPIC_TRIGGER,
                     semantic_confidence_trigger=SEMANTIC_CONFIDENCE_TRIGGER,

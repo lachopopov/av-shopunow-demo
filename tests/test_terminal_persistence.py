@@ -633,6 +633,24 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent['RouterDecision'], ('gpt-6.1-sol', 'low'))
         self.assertEqual(sent['ProducerReply'], ('gpt-6.1-sol', 'medium'))
 
+    async def test_the_served_candidate_check_uses_sol_6_2_low_while_the_writer_stays_on_sol_6_1_medium(self):
+        # Break caught (owner decision 2026-11-24, after the model replay): the excerpt keep/drop call
+        # (CandidateResolution) is not on gpt-6.2-sol low, or the writer or router is moved with it.
+        from shopunow import wiring
+        fixture = self.fixture
+        fixture.current_match = 'uncertain'  # Jev unsure about the Knowledge excerpt: the candidate check runs.
+        fixture.admit_candidates = True
+        admitted = wiring.answering(openai_client=fixture.reviewer, jev_client=fixture.jev)(storage=fixture.storage, tracking=fixture.tracking)
+        fixture.continue_admitted = admitted
+        response = await self.post()
+        self.assertEqual(response.json()['outcome']['kind'], 'answer')
+        sent = {}
+        for schema, body in fixture.calls:
+            if isinstance(body, dict) and 'model' in body:
+                sent.setdefault(schema, (body['model'], (body.get('reasoning') or {}).get('effort')))
+        self.assertEqual(sent['CandidateResolution'], ('gpt-6.2-sol', 'low'))
+        self.assertEqual(sent['ProducerReply'], ('gpt-6.1-sol', 'medium'))
+
     async def test_the_served_wiring_reports_each_answer_step_in_order_and_clears_it_at_the_end(self):
         # Break caught (owner request 2026-11-23): the progress bar shows no step, a wrong order, or a
         # finished question's step stays visible.

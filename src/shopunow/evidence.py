@@ -112,7 +112,7 @@ class EvidenceService:
                  transcript, request_id, created_at, budget, uuid_factory=uuid4,topic_trigger=None,
                  semantic_confidence_trigger=None,topic_confidence_trigger=None,history_identity_resolver=None,
                  answer_models=None,
-                 routing_models=None,on_progress=None):
+                 routing_models=None,candidate_models=None,on_progress=None):
         if (tracking is not attempt._hold_tracking or request.user_id != profile.user_id
                 or str(UUID(request.conversation_id)) != attempt._hold_id):
             raise ValueError('Evidence must retain admitted identity and tracking.')
@@ -138,6 +138,7 @@ class EvidenceService:
         self._malicious_history_ids=set()  # Only successful per-ID review can establish this exclusion.
         self.answer_models=answer_models  # Explicit opt-in; no normal runtime model is enabled.
         self.routing_models=routing_models  # Routing tie-breaker model (owner 2026-11-23); None: answer models.
+        self.candidate_models=candidate_models  # Excerpt keep/drop model (owner 2026-11-24); None: answer models.
         self.on_progress=on_progress  # UI progress step callback (owner 2026-11-23); None: not reported.
         self._routing_attempted=self._candidate_attempted=False
         self._work_timeout=None  # The serialized continuation may impose the earlier specialist cutoff.
@@ -229,7 +230,7 @@ class EvidenceService:
                 # Detach existing verified mappings into JSON-compatible native input, without new authority.
                 'returned_metadata':dict(row.returned_metadata or {}),
                 'retrieval_scope':dict(row.retrieval_scope or {})} for row in candidates]}
-        raw=self._model(self.answer_models.resolve_candidates,payload)
+        raw=self._model((self.candidate_models or self.answer_models).resolve_candidates,payload)
         resolved=CandidateResolution.model_validate(raw.model_dump() if hasattr(raw,'model_dump') else raw)
         status=resolved.outcome.status
         ids=resolved.outcome.relevant_excerpt_ids if status=='resolved' else []

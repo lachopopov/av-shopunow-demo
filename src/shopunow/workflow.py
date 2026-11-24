@@ -227,7 +227,7 @@ def run_private_workflow(*,request,profile,transcript,attempt,tracking,storage,r
                          security_trigger=None,topic_trigger=None,semantic_confidence_trigger=None,
                          topic_confidence_trigger=None,history_identity_resolver=None,fallback_reviewer_client=None,model_budget=None,
                          observe_evidence=None,observe_result=None,observe_response=None,utc_now=None,
-                         uuid_factory=None,routing_models=None,on_progress=None):
+                         uuid_factory=None,routing_models=None,candidate_models=None,on_progress=None):
     """Compose Slice4 inside the admitted worker; public return remains the incoming safe result.
 
     All clients/configuration are explicitly injected. Private observations are request-local;
@@ -266,7 +266,7 @@ def run_private_workflow(*,request,profile,transcript,attempt,tracking,storage,r
         options={} if uuid_factory is None else {'uuid_factory':uuid_factory}
         service=EvidenceService(request=request,profile=profile,transcript=transcript,attempt=attempt,
             tracking=tracking,storage=storage,request_id=request_id,created_at=now().isoformat(),
-            models=evidence_models,answer_models=answer_models,routing_models=routing_models,on_progress=on_progress,budget=budget,
+            models=evidence_models,answer_models=answer_models,routing_models=routing_models,candidate_models=candidate_models,on_progress=on_progress,budget=budget,
             topic_trigger=topic_trigger,semantic_confidence_trigger=semantic_confidence_trigger,
             topic_confidence_trigger=topic_confidence_trigger,
             history_identity_resolver=history_identity_resolver,**options)

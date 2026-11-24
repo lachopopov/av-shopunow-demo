@@ -308,6 +308,24 @@ class EvidenceTests(unittest.TestCase):
                     if status=='resolved' else {'status':status}}
         return SimpleNamespace(resolve_routing=route,resolve_candidates=candidates),calls
 
+    def test_candidate_adjudication_uses_its_own_model_when_one_is_configured(self):
+        # Break caught (owner decision 2026-11-24): the keep/drop call ignores the faster candidate model and
+        # still runs on the writer's model, or the writer's model is no longer the fallback when none is set.
+        self.service.semantic_confidence_trigger=.7
+        self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
+        original=self.models.relevance
+        def relevance(question,candidates,*,timeout):
+            if candidates[0].source_kind=='knowledge':
+                return relevance_answers(candidates,selected=(),uncertain=tuple(row.excerpt_id for row in candidates))
+            return original(question,candidates,timeout=timeout)
+        self.models.relevance=relevance
+        self.service.answer_models,writer_calls=self.semantic_adapter()
+        self.service.candidate_models,candidate_calls=self.semantic_adapter()
+        result=self.prepare()
+        self.assertEqual([stage for stage,_ in candidate_calls],['candidates'])
+        self.assertEqual(writer_calls,[])
+        self.assertEqual([row.source_record_id for row in result.cleared],['SU-SD-001'])
+
     def test_candidate_adjudication_cannot_use_unknown_ids_or_security_uncertain_text(self):
         from typesafe_sdk import ChoiceAnswer
         for verdict in ('clean','uncertain'):

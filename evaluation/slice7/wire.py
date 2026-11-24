@@ -10,17 +10,18 @@ from threading import Lock
 
 import httpx2  # Transport seam of the OpenAI 3.46 and TypeSafe 0.7.5 clients.
 
-# Declared standard public prices (USD per 1M tokens): checked 2026-11-19 (V4) and rechecked unchanged on 2026-11-22
+# Declared standard public prices (USD per 1M tokens): checked 2026-11-19 (V4) rechecked unchanged on 2026-11-22 and 2026-11-24 (OpenAI; gpt-6.2-sol added)
 # at developers.openai.com/api/docs/pricing (standard, <=272K input) and help.typesafe.ai (Jev; no version named).
-RATES = {'checked_on': '2026-11-22',
+RATES = {'checked_on': '2026-11-24',  # Official pricing page; gpt-6.1-sol unchanged, gpt-6.2-sol added (same prices).
          'models': {'gpt-6.1-sol': {'input': '2', 'output': '10', 'cached': '.10', 'write_30m': '2.50', 'write_12h': '5'},
+                    'gpt-6.2-sol': {'input': '2', 'output': '10', 'cached': '.10', 'write_30m': '2.50', 'write_12h': '5'},
                     'gpt-6-luna': {'input': '.10', 'output': '.50', 'cached': '.01', 'write_30m': '.125',
                                    'write_12h': '.25'},
                     'gpt-6.1-terra': {'input': '1', 'output': '5', 'cached': '.05', 'write_30m': '1.25',
                                       'write_12h': '2.50'},
                     'jev-1.14.0': {'input': '.042', 'output': '0'},
                     'text-embedding-3-small': {'input': '.02', 'output': '0'}}}
-ALLOWED = {('api.openai.com', '/v1/responses'): {'gpt-6.1-sol', 'gpt-6-luna', 'gpt-6.1-terra'},
+ALLOWED = {('api.openai.com', '/v1/responses'): {'gpt-6.1-sol', 'gpt-6.2-sol', 'gpt-6-luna', 'gpt-6.1-terra'},
            ('api.openai.com', '/v1/embeddings'): {'text-embedding-3-small'},
            ('api.typesafe.ai', '/v1/systemone'): {'jev-1.14.0'}}
 MILLION = Decimal(1000000)

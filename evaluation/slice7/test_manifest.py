@@ -28,7 +28,7 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(set(data['digests']), {'cases.csv', 'knowledge.json', 'facts.py', 'two_turn.py'})
         self.assertEqual((data['mode'], data['node'], data['promptfoo']), ('main', 'v24.21.0', '0.124.1'))
         self.assertTrue(data['start_utc'] < data['end_utc'] or data['start_utc'] == data['end_utc'])
-        self.assertEqual(data['rates_checked_on'], '2026-11-22')
+        self.assertEqual(data['rates_checked_on'], '2026-11-24')
         self.assertEqual(os.stat(run_dir / 'manifest.json').st_mode & 0o077, 0)
 
 
