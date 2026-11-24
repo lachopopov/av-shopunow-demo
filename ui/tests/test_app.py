@@ -257,7 +257,6 @@ class AppTests(unittest.TestCase):
         self.assertIn('Our support team can help with this.', page)
         self.assertTrue(any(element.key == f'name_{OFFER}' for element in at.text_input))
 
-
     def test_only_the_newest_handoff_form_is_open_and_older_ones_fold_away(self):
         # Break caught (owner UX 2026-11-24, option 3): every offer keeps a large open form, cluttering the chat,
         # or the newest offer's form is hidden where the user is looking.
@@ -304,6 +303,7 @@ class AppTests(unittest.TestCase):
         order = [row['text'] for row in at.session_state['transcript']]
         self.assertEqual(order, ['Q1', 'A1', 'Offer one.', 'Q2', 'A2', 'Offer two.', 'The operation failed.'])
         self.assertTrue({f'name_{OFFER}', f'name_{offer_two}'} <= {element.key for element in at.text_input})
+        self.assertEqual([e.proto.expanded for e in at.expander], [False, True])  # Reopened: newest form open.
 
 
 if __name__ == '__main__':
