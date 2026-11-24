@@ -139,7 +139,6 @@ class EvidenceService:
         self.routing_models=routing_models  # Routing tie-breaker model (owner 2026-11-23); None: answer models.
         self.on_progress=on_progress  # UI progress step callback (owner 2026-11-23); None: not reported.
         self._routing_attempted=self._candidate_attempted=False
-        self._semantic_dependency=False
         self._work_timeout=None  # The serialized continuation may impose the earlier specialist cutoff.
 
     def _adjudicate_route(self,decision):
@@ -168,7 +167,6 @@ class EvidenceService:
         if intent_unresolved and resolved.intent is not None:
             self._unresolved_judgments=[key for key in self._unresolved_judgments if key!='incoming.intent']
         if dependency_unresolved and resolved.dependency is not None:
-            self._semantic_dependency=True
             self._unresolved_judgments=[key for key in self._unresolved_judgments
                                        if not key.endswith('.department_dependency')]
         proposed=[]

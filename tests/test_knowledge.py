@@ -40,8 +40,9 @@ class KnowledgeTests(unittest.TestCase):
             _, catalog = self.prepare(directory, [source_row()])
             document, metadata = self.k.knowledge_payload(catalog['SU-SD-001'])
             self.assertEqual(document,'What is tracking?\nTracking describes synthetic delivery stages.')
-            check = lambda key, text, labels: self.k.verify_knowledge(key, text, labels, role='customer',
-                department=None, destination='shipping_delivery')
+            def check(key, text, labels):
+                return self.k.verify_knowledge(key, text, labels, role='customer',
+                                               department=None, destination='shipping_delivery')
             self.assertEqual(check('SU-SD-001', document, metadata).source_id, 'SU-SD-001')
             for field, value in [('classification','non_general'), ('subject','hr'),
                                  ('eligible_audience',['employee']), ('source_id','SU-SD-002'),
