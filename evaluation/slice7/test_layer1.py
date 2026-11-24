@@ -10,7 +10,8 @@ from layer1 import CASE_STEPS, forbidden_steps, eligible, route, violations  # M
 
 CASES = Path(__file__).resolve().parents[2] / 'datasets' / 'cases.csv'
 SELECTED = {f'FACT-{i:03d}' for i in range(1, 20)} | {'RULE-003', 'RULE-004', 'RULE-005', 'RULE-010',
-                                                     'RULE-011', 'RULE-012', 'RULE-021'}
+                                                     'RULE-011', 'RULE-012', 'RULE-021',
+            'FACT-020', 'RULE-007', 'RULE-009'}  # Routing simplification plan §6.
 CATALOG = {  # Hand-copied labels from knowledge.json (independent of the code under test).
     'SU-HR-002': NS(subject='hr', classification='general', access_scope='employee_general',
                     eligible_audience=('employee',)),
@@ -115,6 +116,13 @@ class ViolationTests(unittest.TestCase):
              ['display:SU-HR-010_value_or_complete_synthesis']),
             (labels(display='SU-HR-010_value'), trace(), CUSTOMER, (), 'The budget is 300 demo credits.',
              ['display:SU-HR-010_value']),
+            # RULE-009 (plan §6): IT's own internal entry must never be read, given to a writer or shown.
+            (labels(read='SU-IT-010_for_direct_answer'), trace(knowledge_reads=['SU-IT-010']), IT, (), '',
+             ['read:SU-IT-010_for_direct_answer']),
+            (labels(dispatch='answer_model_for_internal_fact'), trace(cleared_sources=['SU-IT-010']), IT, (), '',
+             ['dispatch:answer_model_for_internal_fact']),
+            (labels(display='SU-IT-010_value'), trace(), IT, (), 'Your triage tag is Cobalt-4.',
+             ['display:SU-IT-010_value']),
         ]
         for case_labels, observed, profile, departments, text, wanted in table:
             with self.subTest(labels=case_labels, trace=observed):
@@ -129,7 +137,7 @@ class ViolationTests(unittest.TestCase):
     def test_every_label_on_the_selected_cases_is_known(self):
         with CASES.open(encoding='utf-8') as handle:
             rows = [row for row in csv.DictReader(handle) if row['__description'] in SELECTED]
-        self.assertEqual(len(rows), 26)
+        self.assertEqual(len(rows), 29)
         for row in rows:
             case_labels = labels(read=row['forbidden_read'], write=row['forbidden_write'],
                                  dispatch=row['forbidden_dispatch'], receipt=row['forbidden_receipt'],

@@ -10,7 +10,8 @@ import two_turn  # The drawn two-turn writer case (design v3 §3a).
 
 DATASET = Path(__file__).resolve().parents[2] / 'datasets' / 'cases.csv'  # Owner-approved dataset; git-ignored, never published.
 CANONICAL = [f'FACT-{i:03d}' for i in range(1, 20)] + ['RULE-003', 'RULE-004', 'RULE-005', 'RULE-010',
-                                                         'RULE-011', 'RULE-012']
+                                                         'RULE-011', 'RULE-012',
+             'FACT-020', 'RULE-007', 'RULE-009']  # Routing simplification plan §6 (owner 2026-11-23).
 OBSERVATIONAL = ['RULE-021']  # Run once, reported, not scored (a live run cannot force `uncertain`).
 REPEATS = ['RULE-003', 'RULE-004', 'RULE-010', 'FACT-003', 'FACT-007', 'FACT-017']  # Fresh state and identity.
 
@@ -47,5 +48,5 @@ if __name__ == '__main__':  # Writes the tests file Promptfoo reads: python case
     Path(sys.argv[1]).write_text(json.dumps(runs(), indent=1), encoding='utf-8')
 
 
-# Flow: cases.csv -> approved IDs (25 canonical + RULE-021) + 6 repeats -> rows with query/profile (app inputs),
+# Flow: cases.csv -> approved IDs (28 canonical + RULE-021) + 6 repeats -> rows with query/profile (app inputs),
 # case_id/attempt (lookup keys) and split/difficulty/scored labels for the report.

@@ -18,6 +18,9 @@ from ledger import Ledger  # noqa: E402
 from outcomes import accepts, classify, expected  # noqa: E402
 import two_turn  # noqa: E402
 
+# Owner D6 (2026-11-23, accepted downgrade): another department's internal question gets a support offer
+# instead of the dataset's refusal; reported as a known difference, not failed (plan §6). Dataset unchanged.
+KNOWN_DIFFERENCES = {'RULE-007': 'offer:insufficient_evidence'}
 BUDGET_MS = 105000  # MLD §11: 15 s admission + 90 s answering; an overrun fails layer 1 (design §3 check 10).
 
 
@@ -42,7 +45,9 @@ def grade_layer1(out, case_id):
         return False, ['INVALID_RUN'], []
     failures, notes = [], []
     wanted = expected(row['expected_terminal'], row['expected_route'])
-    if not accepts(wanted, category):
+    if KNOWN_DIFFERENCES.get(case_id) == category:
+        notes.append('KNOWN_DIFFERENCE(D6): %s instead of %s' % (category, wanted))
+    elif not accepts(wanted, category):
         failures.append('result:%s!=%s' % (category, wanted))
     departments = set(row['expected_department'].split('+')) - {'none'}
     if not departments and row['expected_route'] == 'central_support':

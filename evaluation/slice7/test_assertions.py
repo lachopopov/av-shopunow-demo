@@ -57,6 +57,22 @@ class Layer1AssertionTests(unittest.TestCase):
                 self.assertFalse(graded['pass'])
                 self.assertIn(reason, graded['reason'])
 
+    def test_rule_007_support_offer_is_a_reported_known_difference(self):
+        # Owner D6 (2026-11-23): another department's internal question gets a support offer, not a refusal.
+        for kind, reason in (('refusal', None), ('handoff_offer', 'insufficient_evidence')):
+            with self.subTest(kind=kind):
+                out = output(kind, 'x', offer_id='o1' if reason else None, reason_code=reason)
+                graded = self.grade('RULE-007', out)
+                self.assertTrue(graded['pass'], graded['reason'])
+                self.assertEqual('KNOWN_DIFFERENCE' in graded['reason'], reason is not None)
+        for out, failure in ((output('answer', 'x'), 'result:answer!=refusal'),
+                             (output('handoff_offer', 'It is 300 credits.', offer_id='o1',
+                                     reason_code='insufficient_evidence'), 'display:SU-HR-010_value')):
+            with self.subTest(failure=failure):
+                graded = self.grade('RULE-007', out)
+                self.assertFalse(graded['pass'])
+                self.assertIn(failure, graded['reason'])
+
     def test_provider_error_is_an_invalid_run_not_an_app_failure(self):
         graded = self.grade('FACT-008', output('fallback_error', provider_errors=1))
         self.assertFalse(graded['pass'])

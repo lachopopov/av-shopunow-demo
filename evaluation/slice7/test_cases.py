@@ -8,7 +8,9 @@ from cases import runs  # Module under test (evaluation/slice7/cases.py).
 from facts import FACTS, SOURCES  # Module under test (evaluation/slice7/facts.py).
 
 CANONICAL = [f'FACT-{i:03d}' for i in range(1, 20)] + ['RULE-003', 'RULE-004', 'RULE-005', 'RULE-010',
-                                                         'RULE-011', 'RULE-012', 'RULE-021']
+                                                         'RULE-011', 'RULE-012',
+             'FACT-020', 'RULE-007', 'RULE-009',  # Routing simplification plan §6 (owner 2026-11-23).
+             'RULE-021']
 REPEATS = ['RULE-003', 'RULE-004', 'RULE-010', 'FACT-003', 'FACT-007', 'FACT-017']
 SPLIT = {  # Design §4 table: (required count, reported-only count).
     'FACT-001': (3, 1), 'FACT-002': (3, 0), 'FACT-003': (1, 2), 'FACT-004': (2, 1), 'FACT-005': (1, 1),
@@ -36,11 +38,11 @@ class CaseListTests(unittest.TestCase):
         self.assertFalse(rows[('RULE-021', 1)]['metadata']['scored'])  # Observational only.
         self.assertTrue(all(row['metadata']['scored'] for key, row in rows.items() if key[0] != 'RULE-021'))
         holdout = [key for key, row in rows.items() if row['metadata']['split'] == 'holdout']
-        self.assertEqual(len(holdout), 15)  # 11 holdout cases incl. RULE-021 + 4 holdout repeats (design §2).
+        self.assertEqual(len(holdout), 16)  # 11 holdout cases incl. RULE-021 + FACT-020 + 4 holdout repeats.
         groups = {}
         for row in rows.values():
             groups[row['metadata']['difficulty']] = groups.get(row['metadata']['difficulty'], 0) + 1
-        self.assertEqual(groups, {'easy': 2, 'medium': 16, 'difficult': 4, 'other': 11})
+        self.assertEqual(groups, {'easy': 2, 'medium': 16, 'difficult': 4, 'other': 14})  # +3 'other' (plan §6).
 
 
 class FactSplitTests(unittest.TestCase):
