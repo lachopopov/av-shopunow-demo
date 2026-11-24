@@ -331,6 +331,28 @@ class EvidenceTests(unittest.TestCase):
         self.assertNotIn('hr',result.destinations)
         self.assertIn('hr',result.refused_parts)
 
+    def test_a_settled_department_lets_an_information_result_clear_a_weak_action_label(self):
+        # Owner decision 2026-11-24 (review of 746be15, F2): the user asked for information and Jev is sure which
+        # department answers it, so they get the answer instead of a support offer even if the router names none.
+        from tests.test_incoming import judgment_answers
+        from shopunow.incoming import validate_judgments
+        self.service.semantic_confidence_trigger=.7
+        self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
+        self.service.answer_models,calls=self.semantic_adapter()
+        original=self.service.answer_models.resolve_routing
+        self.service.answer_models.resolve_routing=lambda payload,**kwargs:{
+            **original(payload,**kwargs),'departments':[]}  # Router: information, no department named.
+        answers=judgment_answers()
+        answers['topic_shipping_delivery']['noul']=1.  # Jev is sure: shipping.
+        answers['intent'].update(choice='individual_case_or_action',confidence=.4,probabilities={
+            'information':.3,'individual_case_or_action':.6,'mixed':.05,'unclear_or_other':.05})
+        result=self.service.prepare(IncomingDecision('semantic_resolution',intent='individual_case_or_action',
+            proposed_destinations=('shipping_delivery',),requires_action_handoff=True,
+            judgments=validate_judgments(answers)))
+        self.assertEqual(result.kind,'ready')
+        self.assertEqual(result.destinations,('shipping_delivery',))
+        self.assertFalse(result.requires_action_handoff)
+
     def semantic_adapter(self, *, dependency='independent', destination='shipping_delivery', status='resolved'):
         # Controlled external answers; the real service must still enforce source/access boundaries.
         from types import SimpleNamespace
