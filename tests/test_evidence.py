@@ -293,6 +293,24 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(second.cleared,())
         self.assertEqual(len(calls),1)
 
+    def test_router_cannot_drop_a_department_jev_already_settled_when_intent_is_unsure(self):
+        # Audit ROUTE-01 (owner 2026-11-24). Break caught: with an unsure intent the incoming step clears its routes,
+        # so a department Jev was sure of is lost whenever the routing model names only another department.
+        from tests.test_incoming import judgment_answers
+        from shopunow.incoming import validate_judgments
+        self.service.semantic_confidence_trigger=.7
+        self.service.topic_confidence_trigger = .1  # Topic bar from wiring.py (plan 4f).
+        self.service.answer_models,calls=self.semantic_adapter(destination='billing_payments')
+        answers=judgment_answers()
+        answers['topic_shipping_delivery']['noul']=1.  # Jev is sure: shipping.
+        answers['topic_billing_payments']['noul']=.52  # Jev is unsure: billing (the router decides).
+        answers['intent'].update(choice='unclear_or_other',confidence=.4,probabilities={
+            'information':.3,'individual_case_or_action':.05,'mixed':.05,'unclear_or_other':.6})
+        result=self.service.prepare(IncomingDecision('semantic_resolution',intent='unclear_or_other',
+            proposed_destinations=('shipping_delivery','billing_payments'),judgments=validate_judgments(answers)))
+        self.assertEqual([stage for stage,_ in calls][:1],['routing'])
+        self.assertEqual(set(result.destinations),{'shipping_delivery','billing_payments'})
+
     def semantic_adapter(self, *, dependency='independent', destination='shipping_delivery', status='resolved'):
         # Controlled external answers; the real service must still enforce source/access boundaries.
         from types import SimpleNamespace

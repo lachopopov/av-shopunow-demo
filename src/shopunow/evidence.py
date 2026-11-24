@@ -177,7 +177,15 @@ class EvidenceService:
             if (answer is None or key in self._unresolved_judgments or
                     (self.topic_trigger is not None and answer.noul>=self.topic_trigger)):
                 proposed.append(part)
-        destinations=tuple(dict.fromkeys((*decision.destinations,*proposed)))
+        # Audit ROUTE-01 (owner 2026-11-24): a department Jev already settled stays even if the router omits it.
+        settled=[]
+        for part in ('central_support','hr','it_support','facilities_admin','billing_payments','shipping_delivery'):
+            key='incoming.'+('company_wide_topic' if part=='central_support' else 'topic_'+part)
+            answer=self._judgments.get(key)
+            if (answer is not None and key not in self._unresolved_judgments
+                    and self.topic_trigger is not None and answer.noul>=self.topic_trigger):
+                settled.append(part)
+        destinations=tuple(dict.fromkeys((*decision.destinations,*settled,*proposed)))
         refused=tuple(dict.fromkeys((*decision.refused_departments,*(part for part in destinations
             if self.profile.role=='customer' and part in ('hr','it_support','facilities_admin')))))
         self.refused_parts=refused  # Early action/ambiguity exits must retain code-owned access dispositions.
