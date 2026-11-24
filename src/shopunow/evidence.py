@@ -77,7 +77,6 @@ class EvidenceResult:
     response_style: str | None = None
     security_fallback_parts: tuple[str, ...] = ()
     refused_parts: tuple[str, ...] = ()
-    handoff_parts: tuple[str, ...] = ()
     destinations: tuple[str, ...] = ()  # Validated producer destinations, finalized after case discovery if needed.
     resolution_candidates: tuple[EvidenceCandidate, ...] = ()  # Clean and permitted, not admitted answer facts.
     judgments: Mapping | None = None  # Native answers keyed by their stage and target.
@@ -573,34 +572,28 @@ class EvidenceService:
             raise ValueError('Recalled evidence became unresolved during review.')
         return EvidenceResult(kind,tuple(self._selected),unresolved,self.pending.message_id,
                               self.request.response_style,affected_parts,
-                              getattr(self,'refused_parts',()),getattr(self,'handoff_parts',()))
+                              getattr(self,'refused_parts',()))
 
     def _with_dispositions(self, result, destinations):
         # Every exit retains established part outcomes and the already verified pending link.
         refused=tuple(dict.fromkeys((*getattr(self,'refused_parts',()),*result.refused_parts)))
-        handoffs=tuple(dict.fromkeys((*getattr(self,'handoff_parts',()),*result.handoff_parts)))
-        conflicts=tuple(part for part in refused if part in handoffs)
-        unresolved=tuple(dict.fromkeys((*result.unresolved_parts,*conflicts,*sorted(self._relevance_unresolved))))
+        unresolved=tuple(dict.fromkeys((*result.unresolved_parts,*sorted(self._relevance_unresolved))))
         kind=result.kind
         factual=any(row.source_kind in ('knowledge','owned_history') for row in result.cleared)
-        if (kind=='insufficient_evidence' and not factual and destinations and not conflicts
-                and not self._relevance_unresolved):
+        if (kind=='insufficient_evidence' and not factual and destinations
+                and not self._relevance_unresolved and set(destinations)<=set(refused)):
             # Do not hide an unsupported independent destination behind another part's refusal.
-            if not handoffs and set(destinations)<=set(refused):
-                kind='refusal'
-            elif not refused and set(destinations)<=set(handoffs):
-                kind='handoff_needed'
+            kind='refusal'
         pending=result.pending_message_id or (None if self.pending is None else self.pending.message_id)
         candidates=tuple(row for row in self._resolution_candidates
                          if row.source_kind!='owned_history' or row.source_record_id in self._history_access_ids) if kind in (
             'ready','insufficient_evidence','clarification_needed') else ()
-        return replace(result,kind=kind,refused_parts=refused,handoff_parts=handoffs,
+        return replace(result,kind=kind,refused_parts=refused,
                        unresolved_parts=unresolved,pending_message_id=pending,
                        resolution_candidates=candidates,judgments=MappingProxyType(dict(self._judgments)),
                        unresolved_judgments=tuple(dict.fromkeys(self._unresolved_judgments)),
                        dispositions=tuple(dict.fromkeys((*result.dispositions,*self._history_dispositions,
                            *(PartDisposition(part,'refusal') for part in refused),
-                           *(PartDisposition(part,'handoff_needed') for part in handoffs),
                            *(PartDisposition(part,'security_fallback') for part in result.security_fallback_parts),
                            *((PartDisposition('action','handoff_needed'),) if
                              getattr(self,'_action_required',False) else ())))))
@@ -608,7 +601,6 @@ class EvidenceService:
     def prepare(self, decision):
         # Routing dispositions already exist even if pending persistence or classification fails.
         self.refused_parts=decision.refused_departments
-        self.handoff_parts=()
         self._action_required=decision.requires_action_handoff
         result=self._prepare(decision)
         destinations=getattr(self,'destinations',decision.destinations)

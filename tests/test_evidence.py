@@ -114,7 +114,7 @@ class EvidenceTests(unittest.TestCase):
                     intent='mixed',dependency='independent',requires_action_handoff=True))
                 self.assertEqual(result.kind,'technical_failure')
                 self.assertEqual(result.refused_parts,('hr',))
-                self.assertEqual(result.handoff_parts,())  # Pass 2: no entry match marks a part for handoff.
+                self.assertFalse({row.part for row in result.dispositions if row.kind=='handoff_needed'}&{'shipping_delivery','billing_payments','hr'})  # Pass 2: no entry match marks a department for handoff.
                 self.assertTrue({'shipping_delivery','hr','billing_payments'}<=set(result.unresolved_parts))
                 self.assertEqual(result.destinations,('shipping_delivery','billing_payments'))
                 self.assertEqual(result.dependency,'independent')
@@ -767,7 +767,8 @@ class EvidenceTests(unittest.TestCase):
                 self.storage.result={'ids':[['SU-HR-010']],'documents':[[document]],'metadatas':[[labels]]}
                 result=self.service.prepare(IncomingDecision('continue',destinations=('hr',)))
                 self.assertEqual(result.kind,'insufficient_evidence')
-                self.assertEqual((result.refused_parts,result.handoff_parts),((),()))
+                self.assertEqual(result.refused_parts,())
+                self.assertFalse({row.part for row in result.dispositions if row.kind=='handoff_needed'}&{'shipping_delivery','billing_payments','hr'})
                 self.assertEqual(result.cleared+result.resolution_candidates,())
                 where=next(call[1] for call in self.storage.calls if isinstance(call,tuple) and call[0]=='knowledge')
                 self.assertIn({'classification':'general'},where['$and'])
@@ -786,7 +787,7 @@ class EvidenceTests(unittest.TestCase):
                     refused_departments=('hr',)))
                 self.assertEqual(result.kind,kind)
                 self.assertEqual(result.refused_parts,('hr',))
-                self.assertEqual(result.handoff_parts,())
+                self.assertFalse({row.part for row in result.dispositions if row.kind=='handoff_needed'}&{'shipping_delivery','billing_payments','hr'})
                 self.assertEqual(result.pending_message_id,self.storage.pending.message_id)
                 self.assertEqual(result.cleared,())
 

@@ -249,7 +249,6 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
     request,profile,request_id=service.request,service.profile,service.request_id
     base_dispositions=tuple(dict.fromkeys((*evidence.dispositions,
         *(PartDisposition(part,'refusal') for part in evidence.refused_parts),
-        *(PartDisposition(part,'handoff_needed') for part in evidence.handoff_parts),
         *(PartDisposition(part,'security_fallback') for part in evidence.security_fallback_parts),
         *((PartDisposition('action','handoff_needed'),) if evidence.requires_action_handoff else ()))))
     base_unresolved=tuple(dict.fromkeys((*evidence.unresolved_parts,
@@ -282,7 +281,7 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
             raise TimeoutError('Recalled context became unresolved.')
         return remaining
 
-    blocked=set(evidence.refused_parts)|set(evidence.handoff_parts)|set(evidence.security_fallback_parts)
+    blocked=set(evidence.refused_parts)|set(evidence.security_fallback_parts)
     # The history owner runs even without evidence, but may then only request history (see factual()).
     owner_may_ask=owner not in blocked and evidence.kind!='clarification_needed'
     eligible=tuple(part for part in destinations if part not in blocked and (part==owner and owner_may_ask or any(
@@ -372,7 +371,7 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
                         extra=future.result()
                         part=supplementary_part
                         supplementary_unresolved[part]=tuple(dict.fromkeys((*extra.unresolved_parts,
-                            *extra.refused_parts,*extra.handoff_parts,
+                            *extra.refused_parts,
                             *(row.part for row in extra.dispositions if row.kind!='supported_answer'),
                             *(('action',) if extra.requires_action_handoff else ()))))
                         supplementary_dispositions.extend(extra.dispositions)
@@ -492,7 +491,7 @@ def run_production(*, evidence,service,models,observe_draft=None,observe_freeze=
                     earlier_unresolved=set(unresolved)  # Status known before this search must survive its resume.
                     extra=service.supplementary(target=answer.target,work_timeout=timeout)
                     unresolved=tuple(dict.fromkeys((*unresolved,*extra.unresolved_parts,*extra.refused_parts,
-                        *extra.handoff_parts,*(row.part for row in extra.dispositions if row.kind!='supported_answer'),
+                        *(row.part for row in extra.dispositions if row.kind!='supported_answer'),
                         *(('action',) if extra.requires_action_handoff else ()))))
                     supplementary_dispositions.extend(extra.dispositions)
                     if extra.kind in ('security_fallback','security_uncertain'):

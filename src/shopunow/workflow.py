@@ -277,7 +277,6 @@ def run_private_workflow(*,request,profile,transcript,attempt,tracking,storage,r
         else:
             dispositions=tuple(dict.fromkeys((*evidence.dispositions,
                 *(PartDisposition(part,'refusal') for part in evidence.refused_parts),
-                *(PartDisposition(part,'handoff_needed') for part in evidence.handoff_parts),
                 *((PartDisposition('action','handoff_needed'),) if evidence.requires_action_handoff else ()))))
             nonproducing(evidence.kind,dispositions,evidence.unresolved_parts)
 
