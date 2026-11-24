@@ -620,7 +620,7 @@ class ReviewedDeliveryTests(unittest.IsolatedAsyncioTestCase):
         # use Sol at low effort, or the writer is moved off the evaluated Sol medium configuration with it.
         from shopunow import wiring
         fixture = self.fixture
-        fixture.answers['topic_shipping_delivery']['noul'] = .6  # Present but uncertain: routing is adjudicated.
+        fixture.answers['topic_shipping_delivery']['noul'] = .52  # Present but uncertain (band 0.45-0.55): routing is adjudicated.
         admitted = wiring.answering(openai_client=fixture.reviewer, jev_client=fixture.jev)(storage=fixture.storage, tracking=fixture.tracking)
         fixture.continue_admitted = admitted
         response = await self.post()

@@ -259,9 +259,9 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.fixture.producer_hook=produce
 
     async def test_customer_continuation_ignores_only_unrelated_weak_route_fields(self):
-        for name,company,scores,released in (('unrelated weak company score',.6,{},True),
-                                             ('unrelated weak department score',None,{'billing_payments':.35},True),
-                                             ('another answered topic is weak',None,{'billing_payments':.75},False)):
+        for name,company,scores,released in (('unrelated weak company score',.53,{},True),
+                                             ('unrelated weak department score',None,{'billing_payments':.47},True),
+                                             ('another answered topic is weak',None,{'billing_payments':.54},False)):
             with self.subTest(name=name):
                 await self.reset_http()
                 answered=name.startswith('another')
@@ -287,9 +287,9 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual('owned_history' in kinds,released)
 
     async def test_unrouted_search_hint_with_an_uncertain_source_is_not_reported_unresolved(self):
-        cases=((('SU-BP-004','SU-SD-002'),'shipping_delivery','topic_shipping_delivery','billing_payments',.3),
-               (('SU-SD-004','SU-BP-005'),'billing_payments','topic_billing_payments','shipping_delivery',.62),
-               (('SU-BP-004','SU-CW-002'),'central_support','company_wide_topic','billing_payments',.25))
+        cases=((('SU-BP-004','SU-SD-002'),'shipping_delivery','topic_shipping_delivery','billing_payments',.47),
+               (('SU-SD-004','SU-BP-005'),'billing_payments','topic_billing_payments','shipping_delivery',.53),
+               (('SU-BP-004','SU-CW-002'),'central_support','company_wide_topic','billing_payments',.46))
         labels=('independent','dependent','unclear')
         for sources,hint,field,main,score in cases:
             for dependency in labels:
@@ -404,7 +404,7 @@ class PrivateWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_restricted_topic_added_by_adjudication_stays_refused_for_customers(self):
         fixture=await self.fresh_fixture()
         fixture.answers['intent']=self.action_label(.5)
-        fixture.answers['topic_hr']['noul']=.4  # Weak, so only the adjudicator's route can add it.
+        fixture.answers['topic_hr']['noul']=.47  # Weak (unsure band 0.45-0.55, plan §4f), so only the adjudicator's route can add it.
         fixture.destinations=('hr','shipping_delivery')
         await self.post()
         result=fixture.boundaries[0]

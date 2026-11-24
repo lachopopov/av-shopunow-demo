@@ -4,6 +4,8 @@
 #        SLICE7_CALIBRATION_APPROVED=yes evaluation/slice7/run.sh calibrate   -> PAID: 11 judge variants, 22 calls
 #        SLICE7_PAID_APPROVED=yes SLICE7_CALIBRATION_RUN=<accepted calibration folder> evaluation/slice7/run.sh main
 #            -> PAID: real app + judge + seam cases; calibration spend carried into the same $5 ledger (design §7)
+#        Optional SLICE7_FILTER='<regex on test description>' (main): run only matching rows, no seam cases
+#            (owner 2026-11-24, plan §4f: rerun only the cases a change affects).
 # Paid modes refuse uncommitted changes in src/, evaluation/ or ui/, so the run matches commit X (manifest.json).
 # Everything (config, tests, results, Promptfoo state/cache, ledger, wire logs) goes to a new mode-700 run folder.
 set -euo pipefail
@@ -96,9 +98,9 @@ else  # Credentials from .env into this process tree only; never printed.
   "$PYTHON" -c "import sys; sys.path.insert(0,'$HERE'); from ledger import Ledger; \
 Ledger('$RUN/ledger.json').carry_over('$SLICE7_CALIBRATION_RUN/ledger.json')"
   uv run --frozen --project "$REPO" --env-file "$REPO/.env" -- "$PROMPTFOO" eval -c "$RUN/promptfooconfig.yaml" \
-    --no-cache --no-share -j 1 -o "$RUN/results.json" || true
-  # Seam cases S4/P4 (labelled "seam", reported separately; same ledger and $5 stop).
-  uv run --frozen --project "$REPO" --env-file "$REPO/.env" -- "$PYTHON" "$HERE/seam.py" "$RUN" || true
+    --no-cache --no-share -j 1 -o "$RUN/results.json" ${SLICE7_FILTER:+--filter-pattern "$SLICE7_FILTER"} || true
+  # Seam cases S4/P4 (labelled "seam", reported separately; same ledger and $5 stop); skipped for a filtered rerun.
+  [ -n "${SLICE7_FILTER:-}" ] || uv run --frozen --project "$REPO" --env-file "$REPO/.env" -- "$PYTHON" "$HERE/seam.py" "$RUN" || true
   "$PYTHON" -c "import sys; sys.path.insert(0,'$HERE'); from ledger import Ledger; \
 print(Ledger('$RUN/ledger.json').totals())"  # Totals (incl. run_invalid) come from the ledger, not Promptfoo.
 fi

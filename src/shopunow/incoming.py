@@ -70,6 +70,9 @@ HISTORY_ROUTE_FIELDS = tuple(key for key in NOUL_FIELDS
                             if key=='company_wide_topic' or key.startswith('topic_')) + ('department_dependency',)
 
 
+TOPIC_SETTLED = .1  # = 2 x (0.55 - 0.5); was the shared 0.7 (= p 0.85). Jev replay 2026-11-24, plan §4f.
+
+
 def _number(value, maximum=1.0):
     # Python bool is an int subclass; a boolean is not a provider probability.
     if type(value) not in (int, float) or not isfinite(value) or not 0 <= value <= maximum:
@@ -81,8 +84,9 @@ def semantic_confident(answer, threshold):
     if threshold is None:
         return True  # Unconfigured callers retain the frozen policy, not a new serving default.
     _number(threshold)
-    confidence=abs(2*answer.noul-1) if isinstance(answer,NoulAnswer) else answer.confidence
-    return confidence>=threshold
+    if isinstance(answer,NoulAnswer):  # Topics: settled at p >= 0.55 or <= 0.45 (owner 2026-11-24, plan §4f).
+        return abs(2*answer.noul-1)>=TOPIC_SETTLED
+    return answer.confidence>=threshold  # Choices (intent, dependency, relevance) keep the configured bar.
 
 
 def validate_judgments(answers):

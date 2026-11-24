@@ -171,7 +171,7 @@ class EvidenceTests(unittest.TestCase):
     def test_strong_native_supplementary_history_still_requires_exact_subject_access(self):
         from tests.test_incoming import judgment_answers
         from shopunow.incoming import validate_history_route,HISTORY_ROUTE_FIELDS
-        for subject,probability in (('hr',1.),('shipping_delivery',.6)):
+        for subject,probability in (('hr',1.),('shipping_delivery',.52)):
             with self.subTest(subject=subject):
                 self.setUp()
                 self.prepare(intent='information')

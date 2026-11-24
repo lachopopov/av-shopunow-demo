@@ -19,14 +19,14 @@ class RouterContractTests(unittest.TestCase):
         self.service.semantic_confidence_trigger = .7
         return calls
 
-    def decide(self, weak_dependency):
+    def decide(self, weak_dependency, shipping=1., dependency_confidence=.4):
         from shopunow.incoming import validate_judgments
         from shopunow.workflow import IncomingDecision
         from tests.test_incoming import judgment_answers
         answers = judgment_answers()
-        answers['topic_shipping_delivery']['noul'] = 1.
+        answers['topic_shipping_delivery']['noul'] = shipping
         if weak_dependency:
-            answers['department_dependency'].update(confidence=.4, probabilities={
+            answers['department_dependency'].update(confidence=dependency_confidence, probabilities={
                 'independent': .6, 'dependent': .39, 'unclear': .01})
         return self.service.prepare(IncomingDecision('continue', destinations=('shipping_delivery',),
             intent='information', judgments=validate_judgments(answers)))
@@ -43,6 +43,23 @@ class RouterContractTests(unittest.TestCase):
         calls = self.router()
         self.assertEqual(self.decide(weak_dependency=False).kind, 'ready')
         self.assertEqual(calls, [])
+
+    # Owner decision 2026-11-24 (plan §4f): a topic is settled from p >= 0.55 (or <= 0.45); choices keep 0.7.
+    def test_topic_at_six_tenths_is_settled_without_the_router(self):
+        calls = self.router()
+        result = self.decide(weak_dependency=False, shipping=.6)
+        self.assertEqual(calls, [])
+        self.assertEqual((result.kind, result.destinations), ('ready', ('shipping_delivery',)))
+
+    def test_topic_at_a_coin_flip_still_goes_to_the_router(self):
+        calls = self.router()
+        self.decide(weak_dependency=False, shipping=.52)
+        self.assertEqual(len(calls), 1)
+
+    def test_choice_judgments_keep_the_seven_tenths_bar(self):
+        calls = self.router()
+        self.decide(weak_dependency=True, dependency_confidence=.6)  # Would pass a topic-style 0.1 bar.
+        self.assertEqual(len(calls), 1)
 
 
 if __name__ == '__main__':
